@@ -38,6 +38,23 @@ let discardNext   = false;
 let timerInterval = null;
 let recordStart   = 0;
 
+// Web Audio API State
+let audioCtx      = null;
+let analyser      = null;
+let dataArray     = null;
+let drawVisual    = null;
+const canvas      = $('#audio-visualizer');
+const canvasCtx   = canvas ? canvas.getContext('2d') : null;
+
+function resizeCanvas() {
+    if (canvas) {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+}
+window.addEventListener('resize', resizeCanvas);
+resizeCanvas();
+
 // ═══════════════════════════════════════════════════
 // Configuración de Servidor
 // ═══════════════════════════════════════════════════
@@ -247,6 +264,20 @@ async function startRecording() {
         isRecording = true;
         startTimer();
 
+        // Initialize Web Audio API for visualizer
+        if (canvasCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            
+            const bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+            
+            visualize();
+        }
+
         // Update UI
         recordBtn.classList.add('recording');
         discardBtn.classList.remove('hidden');
@@ -270,6 +301,13 @@ function stopRecording() {
     }
     isRecording = false;
     stopTimer();
+    
+    // Stop visualizer
+    if (drawVisual) cancelAnimationFrame(drawVisual);
+    if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
+    if (canvasCtx && canvas) {
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    }
 
     // Update UI to sending state
     recordBtn.classList.remove('recording');
@@ -286,11 +324,72 @@ function resetUI() {
     isRecording = false;
     discardNext = false;
     stopTimer();
+    
+    // Stop visualizer
+    if (drawVisual) cancelAnimationFrame(drawVisual);
+    if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
+    if (canvasCtx && canvas) {
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    
     recordBtn.classList.remove('recording', 'sending');
     discardBtn.classList.add('hidden');
     statusIcon.textContent = '🎙️';
     statusText.textContent = 'Toca para grabar';
     timerEl.textContent = '00:00';
+}
+
+// ═══════════════════════════════════════════════════
+// Audio Visualizer Loop
+// ═══════════════════════════════════════════════════
+function visualize() {
+    if (!isRecording) return;
+    
+    drawVisual = requestAnimationFrame(visualize);
+    analyser.getByteFrequencyData(dataArray);
+
+    // Calculate average volume
+    let sum = 0;
+    for(let i = 0; i < dataArray.length; i++) {
+        sum += dataArray[i];
+    }
+    let avgVolume = sum / dataArray.length;
+    let volumeNorm = avgVolume / 256; // 0 to 1
+
+    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Only draw if skin is studio to save resources
+    if (!document.body.classList.contains('skin-studio')) return;
+
+    // Draw fluid sine waves
+    const time = Date.now() / 1000;
+    const centerY = canvas.height / 2;
+    
+    const waves = [
+        { color: 'rgba(94, 106, 210, 0.7)', freq: 0.01, speed: 2, ampOffset: 1 },
+        { color: 'rgba(255, 74, 150, 0.7)', freq: 0.015, speed: 3, ampOffset: 0.8 },
+        { color: 'rgba(74, 255, 200, 0.7)', freq: 0.008, speed: 1.5, ampOffset: 1.2 }
+    ];
+
+    canvasCtx.globalCompositeOperation = 'screen';
+    waves.forEach(wave => {
+        canvasCtx.beginPath();
+        canvasCtx.lineWidth = 4;
+        canvasCtx.strokeStyle = wave.color;
+        
+        // Amplitude responds to volume
+        const amplitude = (volumeNorm * 250 * wave.ampOffset) + 10;
+        
+        for (let x = 0; x < canvas.width; x += 5) {
+            // Sine wave calculation
+            const y = centerY + Math.sin(x * wave.freq + time * wave.speed) * amplitude * Math.sin(x * Math.PI / canvas.width);
+            
+            if (x === 0) canvasCtx.moveTo(x, y);
+            else canvasCtx.lineTo(x, y);
+        }
+        canvasCtx.stroke();
+    });
+    canvasCtx.globalCompositeOperation = 'source-over';
 }
 
 // ═══════════════════════════════════════════════════
