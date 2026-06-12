@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="description" content="Grabador de audio médico profesional - Dr. Bot">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#0a0a0f">
+    <title>Dr. Bot Recorder</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- ═══ Setup Screen (Token Configuration) ═══ -->
+    <div id="setup-screen" class="screen">
+        <div class="setup-container">
+            <div class="logo-area">
+                <div class="logo-icon">🩺</div>
+                <h1>Dr. Bot Recorder</h1>
+                <p class="subtitle">Grabador de audio médico</p>
+            </div>
+            <div class="token-form">
+                <label for="token-input">Token de Acceso</label>
+                <input 
+                    type="password" 
+                    id="token-input" 
+                    placeholder="Pega tu token aquí"
+                    autocomplete="off"
+                    spellcheck="false"
+                >
+
+                <button id="save-token-btn" class="btn-primary">Guardar y Conectar</button>
+                <p id="setup-error" class="error-msg"></p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Recorder Screen ═══ -->
+    <div id="recorder-screen" class="screen hidden">
+        <!-- Top Bar -->
+        <header class="top-bar">
+            <div class="skin-selector">
+                <button id="skin-normal" class="skin-btn active" title="Normal">☀️</button>
+                <button id="skin-dim" class="skin-btn" title="Intermedio">🌙</button>
+                <button id="skin-zen" class="skin-btn" title="Modo Zen">🧘</button>
+            </div>
+            <button id="settings-btn" class="icon-btn" title="Configuración">⚙️</button>
+        </header>
+
+        <!-- Recording Area -->
+        <main class="recording-area">
+            <!-- Status Indicator -->
+            <div id="status-container" class="status-container">
+                <div id="status-icon" class="status-icon">🎙️</div>
+                <p id="status-text" class="status-text">Toca para grabar</p>
+                <p id="timer" class="timer">00:00</p>
+            </div>
+
+            <!-- Record Button -->
+            <button id="record-btn" class="record-btn" aria-label="Grabar">
+                <div class="record-btn-inner"></div>
+                <div class="record-btn-pulse"></div>
+            </button>
+        </main>
+
+        <!-- Notification Area -->
+        <div id="notification" class="notification hidden">
+            <span id="notification-icon"></span>
+            <span id="notification-text"></span>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
