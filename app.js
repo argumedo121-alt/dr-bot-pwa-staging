@@ -19,6 +19,7 @@ const tokenInput    = $('#token-input');
 const saveTokenBtn  = $('#save-token-btn');
 const setupError    = $('#setup-error');
 const recordBtn     = $('#record-btn');
+const discardBtn    = $('#discard-btn');
 const statusIcon    = $('#status-icon');
 const statusText    = $('#status-text');
 const timerEl       = $('#timer');
@@ -33,6 +34,7 @@ const settingsBtn   = $('#settings-btn');
 let mediaRecorder = null;
 let audioChunks   = [];
 let isRecording   = false;
+let discardNext   = false;
 let timerInterval = null;
 let recordStart   = 0;
 
@@ -184,6 +186,13 @@ recordBtn.addEventListener('click', async () => {
     }
 });
 
+discardBtn.addEventListener('click', () => {
+    if (isRecording) {
+        discardNext = true;
+        stopRecording();
+    }
+});
+
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -215,6 +224,13 @@ async function startRecording() {
             // Stop all tracks to release mic
             stream.getTracks().forEach(t => t.stop());
             
+            if (discardNext) {
+                discardNext = false;
+                showNotification('warning', '🗑️', 'Grabación desechada', 3000);
+                resetUI();
+                return;
+            }
+            
             const ext = mediaRecorder.mimeType.includes('mp4') ? '.mp4' : '.webm';
             const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
             sendAudio(blob, ext);
@@ -231,6 +247,7 @@ async function startRecording() {
 
         // Update UI
         recordBtn.classList.add('recording');
+        discardBtn.classList.remove('hidden');
         statusIcon.textContent = '🔴';
         statusText.textContent = 'Grabando... toca para detener';
 
@@ -254,15 +271,21 @@ function stopRecording() {
 
     // Update UI to sending state
     recordBtn.classList.remove('recording');
-    recordBtn.classList.add('sending');
-    statusIcon.textContent = '📤';
-    statusText.textContent = 'Enviando y procesando...';
+    discardBtn.classList.add('hidden');
+    
+    if (!discardNext) {
+        recordBtn.classList.add('sending');
+        statusIcon.textContent = '📤';
+        statusText.textContent = 'Enviando y procesando...';
+    }
 }
 
 function resetUI() {
     isRecording = false;
+    discardNext = false;
     stopTimer();
     recordBtn.classList.remove('recording', 'sending');
+    discardBtn.classList.add('hidden');
     statusIcon.textContent = '🎙️';
     statusText.textContent = 'Toca para grabar';
     timerEl.textContent = '00:00';
