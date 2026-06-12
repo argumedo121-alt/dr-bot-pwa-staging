@@ -114,9 +114,10 @@ settingsBtn.addEventListener('click', () => {
 // Skin Switching
 // ═══════════════════════════════════════════════════
 function applySkin(skin) {
-    document.body.classList.remove('skin-dim', 'skin-zen');
+    document.body.classList.remove('skin-dim', 'skin-zen', 'skin-neon');
     if (skin === 'dim')  document.body.classList.add('skin-dim');
     if (skin === 'zen')  document.body.classList.add('skin-zen');
+    if (skin === 'neon') document.body.classList.add('skin-neon');
 
     $$('.skin-btn').forEach(btn => btn.classList.remove('active'));
     $(`#skin-${skin}`)?.classList.add('active');
@@ -127,6 +128,7 @@ function applySkin(skin) {
 $('#skin-normal').addEventListener('click', () => applySkin('normal'));
 $('#skin-dim').addEventListener('click',    () => applySkin('dim'));
 $('#skin-zen').addEventListener('click',    () => applySkin('zen'));
+$('#skin-neon').addEventListener('click',   () => applySkin('neon'));
 
 // ═══════════════════════════════════════════════════
 // Timer

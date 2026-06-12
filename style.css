@@ -48,14 +48,41 @@ body.skin-zen {
     --bg-primary: #000000;
     --bg-secondary: #050505;
     --bg-card: #0a0a0a;
-    --text-primary: #333340;
-    --text-secondary: #1a1a24;
-    --accent: #1a1a30;
-    --accent-glow: rgba(26, 26, 48, 0.1);
-    --record-color: #3a1515;
-    --record-glow: rgba(58, 21, 21, 0.15);
-    --border: rgba(255, 255, 255, 0.02);
-    --notification-bg: rgba(0, 0, 0, 0.98);
+    --text-primary: #808080;
+    --text-secondary: #404040;
+    --accent: #333333;
+    --accent-glow: rgba(255, 255, 255, 0.05);
+    --record-color: #550000;
+    --record-glow: rgba(85, 0, 0, 0.3);
+    --border: rgba(255, 255, 255, 0.03);
+    --notification-bg: rgba(5, 5, 5, 0.98);
+}
+
+/* ─── Neon Skin (Vibrant & Striking) ─── */
+body.skin-neon {
+    --bg-primary: #090914;
+    --bg-secondary: #120e26;
+    --bg-card: rgba(30, 20, 50, 0.6);
+    --text-primary: #f0f0ff;
+    --text-secondary: #b0a0f0;
+    --accent: #ff2a85;
+    --accent-glow: rgba(255, 42, 133, 0.6);
+    --record-color: #00f0ff;
+    --record-glow: rgba(0, 240, 255, 0.6);
+    --border: rgba(255, 42, 133, 0.3);
+    --notification-bg: rgba(20, 10, 40, 0.95);
+    
+    /* Neon glassmorphism overrides */
+    background-image: radial-gradient(circle at 50% -20%, #2a1b4d, var(--bg-primary));
+}
+body.skin-neon .screen {
+    backdrop-filter: blur(10px);
+}
+body.skin-neon .status-icon {
+    text-shadow: 0 0 20px var(--record-glow);
+}
+body.skin-neon .timer {
+    text-shadow: 0 0 10px var(--accent-glow);
 }
 
 body.skin-zen .top-bar {
