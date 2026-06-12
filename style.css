@@ -270,7 +270,7 @@ body {
     border: none;
     border-radius: 8px;
     background: transparent;
-    font-size: 16px;
+    font-size: 22px;
     cursor: pointer;
     transition: background var(--transition);
     display: flex;
@@ -506,4 +506,168 @@ body {
 #notification-icon {
     font-size: 20px;
     flex-shrink: 0;
+}
+
+/* ═══════════════════════════════════════════════════
+   MODO STUDIO PRO (SKIN-STUDIO)
+   ═══════════════════════════════════════════════════ */
+body.skin-studio {
+    /* Fondo Glassmorphism Oscuro con tinte Azul/Morado */
+    background: linear-gradient(135deg, #090a10 0%, #1a1a2e 100%);
+    color: #e0e6ed;
+    --bg-card: rgba(30, 32, 48, 0.4);
+    --border: rgba(255, 255, 255, 0.08);
+    --accent: #5e6ad2;
+    --text-primary: #ffffff;
+    --text-secondary: #8c9bba;
+}
+
+body.skin-studio::before {
+    content: '';
+    position: fixed;
+    top: -50%; left: -50%; width: 200%; height: 200%;
+    background: radial-gradient(circle at 50% 50%, rgba(94, 106, 210, 0.15), transparent 60%);
+    animation: studioBreath 10s infinite alternate ease-in-out;
+    pointer-events: none;
+    z-index: -1;
+}
+
+@keyframes studioBreath {
+    0% { transform: scale(0.8); opacity: 0.5; }
+    100% { transform: scale(1.1); opacity: 1; }
+}
+
+/* Rediseño total del Layout de Grabación */
+body.skin-studio .recording-area {
+    justify-content: flex-start;
+    padding-top: 10vh;
+    gap: 0;
+}
+
+body.skin-studio .status-container {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 32px;
+    padding: 40px;
+    width: 90%;
+    max-width: 400px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+    margin-bottom: auto;
+    position: relative;
+    overflow: hidden;
+}
+
+body.skin-studio .timer {
+    font-size: 72px;
+    font-weight: 700;
+    letter-spacing: -2px;
+    margin-top: 10px;
+    text-shadow: 0 4px 20px rgba(255,255,255,0.2);
+    font-family: 'Inter', monospace;
+}
+
+body.skin-studio .status-icon {
+    font-size: 32px;
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    margin: 0;
+    opacity: 0.5;
+}
+
+/* Animación de Grabación (Ondas) simulada en el estatus */
+body.skin-studio .record-btn.recording ~ * .status-icon {
+    animation: pulseIcon 1s infinite alternate;
+    opacity: 1;
+}
+
+@keyframes pulseIcon {
+    from { transform: scale(1); filter: drop-shadow(0 0 5px rgba(255,0,0,0.5)); }
+    to { transform: scale(1.2); filter: drop-shadow(0 0 15px rgba(255,0,0,1)); }
+}
+
+/* El botón de grabar se vuelve una barra inferior */
+body.skin-studio .controls {
+    position: fixed;
+    bottom: 40px;
+    left: 20px;
+    right: 20px;
+    flex-direction: row-reverse;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-card);
+    padding: 12px;
+    border-radius: 40px;
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--border);
+}
+
+body.skin-studio .record-btn {
+    width: auto;
+    flex-grow: 1;
+    height: 60px;
+    border-radius: 30px;
+    border: none;
+    background: var(--accent);
+    color: white;
+    margin-left: 12px;
+    box-shadow: 0 8px 24px rgba(94, 106, 210, 0.4);
+}
+
+body.skin-studio .record-btn-inner, 
+body.skin-studio .record-btn-pulse {
+    display: none; /* Ocultamos el círculo interno */
+}
+
+body.skin-studio .record-btn::after {
+    content: 'INICIAR GRABACIÓN';
+    font-weight: 700;
+    font-size: 16px;
+    letter-spacing: 1px;
+}
+
+body.skin-studio .record-btn.recording {
+    background: #ff4a4a;
+    box-shadow: 0 8px 24px rgba(255, 74, 74, 0.4);
+    animation: studioPulseRecord 2s infinite;
+}
+
+body.skin-studio .record-btn.recording::after {
+    content: 'DETENER Y ENVIAR';
+}
+
+@keyframes studioPulseRecord {
+    0% { box-shadow: 0 0 0 0 rgba(255, 74, 74, 0.4); }
+    70% { box-shadow: 0 0 0 15px rgba(255, 74, 74, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 74, 74, 0); }
+}
+
+body.skin-studio .record-btn.sending {
+    background: var(--accent);
+    opacity: 0.7;
+}
+
+body.skin-studio .record-btn.sending::after {
+    content: 'PROCESANDO...';
+    animation: pulse 1s infinite alternate;
+}
+
+/* El botón de desechar en Modo Studio */
+body.skin-studio .discard-btn {
+    width: 60px;
+    height: 60px;
+    padding: 0;
+    flex-shrink: 0;
+    border-radius: 50%;
+    margin: 0;
+    box-shadow: none;
+    background: rgba(255,255,255,0.05);
+    font-size: 0; /* Oculta el texto "Cancelar" */
+}
+
+body.skin-studio .discard-btn .discard-icon {
+    margin: 0;
+    font-size: 24px; /* Mantiene el emoji visible */
 }
