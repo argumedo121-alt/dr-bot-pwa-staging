@@ -1,15 +1,8 @@
 /**
  * Dr. Bot PWA — Application Logic
- * 
- * Handles: Token auth (localStorage), audio recording (MediaRecorder API),
- * server communication, skin switching, and error notifications.
- * 
- * Audio format: webm (native browser codec, verified compatible with Gemini API).
  */
 
-// ═══════════════════════════════════════════════════
 // DOM Elements
-// ═══════════════════════════════════════════════════
 const $  = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -17,6 +10,7 @@ const setupScreen   = $('#setup-screen');
 const recorderScreen = $('#recorder-screen');
 const tokenInput    = $('#token-input');
 const saveTokenBtn  = $('#save-token-btn');
+const cancelSetupBtn = $('#cancel-setup-btn');
 const setupError    = $('#setup-error');
 const recordBtn     = $('#record-btn');
 const discardBtn    = $('#discard-btn');
@@ -28,15 +22,28 @@ const notifIcon     = $('#notification-icon');
 const notifText     = $('#notification-text');
 const settingsBtn   = $('#settings-btn');
 
-// ═══════════════════════════════════════════════════
+// Log Elements
+const logPanel = $('#log-panel');
+const logEntries = $('#log-entries');
+const logToggleBtn = $('#log-toggle-btn');
+let logCount = 0;
+
+// Account Elements
+const accountBtn = $('#account-btn');
+const accountModal = $('#account-modal');
+const accountCloseBtn = $('#account-close-btn');
+const accountContent = $('#account-content');
+
 // State
-// ═══════════════════════════════════════════════════
 let mediaRecorder = null;
 let audioChunks   = [];
 let isRecording   = false;
 let discardNext   = false;
 let timerInterval = null;
 let recordStart   = 0;
+
+// API SERVER - Will be injected
+const API_SERVER = 'https://garrett-apotropaic-trophically.ngrok-free.dev';
 
 // Web Audio API State
 let audioCtx      = null;
@@ -55,15 +62,6 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 resizeCanvas();
 
-// ═══════════════════════════════════════════════════
-// Configuración de Servidor
-// ═══════════════════════════════════════════════════
-// Ngrok Tunnel (HTTPS seguro)
-const API_SERVER = 'https://garrett-apotropaic-trophically.ngrok-free.dev';
-
-// ═══════════════════════════════════════════════════
-// Storage Helpers
-// ═══════════════════════════════════════════════════
 const STORAGE_KEYS = {
     TOKEN:  'drbot_pwa_token',
     SKIN:   'drbot_pwa_skin',
@@ -71,17 +69,16 @@ const STORAGE_KEYS = {
 
 function getToken()  { return localStorage.getItem(STORAGE_KEYS.TOKEN);  }
 function getSkin()   { return localStorage.getItem(STORAGE_KEYS.SKIN) || 'normal'; }
+function saveConfig(token) { localStorage.setItem(STORAGE_KEYS.TOKEN, token); }
 
-function saveConfig(token) {
-    localStorage.setItem(STORAGE_KEYS.TOKEN, token);
-}
-
-// ═══════════════════════════════════════════════════
-// Screen Navigation
-// ═══════════════════════════════════════════════════
 function showSetup() {
     setupScreen.classList.remove('hidden');
     recorderScreen.classList.add('hidden');
+    if (getToken()) {
+        cancelSetupBtn.classList.remove('hidden');
+    } else {
+        cancelSetupBtn.classList.add('hidden');
+    }
 }
 
 function showRecorder() {
@@ -89,55 +86,149 @@ function showRecorder() {
     recorderScreen.classList.remove('hidden');
 }
 
-// ═══════════════════════════════════════════════════
-// Initialization
-// ═══════════════════════════════════════════════════
 function init() {
-    const token  = getToken();
-
-    if (token) {
+    if (getToken()) {
         showRecorder();
     } else {
         showSetup();
     }
-
-    // Apply saved skin
     applySkin(getSkin());
 }
 
-// ═══════════════════════════════════════════════════
-// Token Setup
-// ═══════════════════════════════════════════════════
 saveTokenBtn.addEventListener('click', () => {
     const token  = tokenInput.value.trim();
-
     setupError.textContent = '';
-
     if (!token) {
         setupError.textContent = '❌ Ingresa tu token de acceso';
         return;
     }
-
     saveConfig(token);
+    cancelSetupBtn.classList.add('hidden');
     showRecorder();
     showNotification('success', '✅', 'Configuración guardada');
 });
 
-// Settings button → go back to setup
+cancelSetupBtn.addEventListener('click', showRecorder);
+
 settingsBtn.addEventListener('click', () => {
-    if (isRecording) return; // Don't allow during recording
+    if (isRecording) return; 
     showSetup();
 });
 
-// ═══════════════════════════════════════════════════
-// Skin Switching
-// ═══════════════════════════════════════════════════
+// LOG SYSTEM
+function addLog(icon, message, type = 'info') {
+    const now = new Date();
+    const time = now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    const emptyMsg = logEntries.querySelector('.log-empty');
+    if (emptyMsg) emptyMsg.remove();
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry log-${type}`;
+    entry.innerHTML = `<span class="log-time">${time}</span> <span class="log-icon">${icon}</span> <span class="log-msg">${message}</span>`;
+    logEntries.prepend(entry);
+    
+    while (logEntries.children.length > 15) {
+        logEntries.removeChild(logEntries.lastChild);
+    }
+    logCount++;
+    updateLogBadge();
+}
+
+function updateLogBadge() {
+    let badge = logToggleBtn.querySelector('.log-badge');
+    if (!logPanel.classList.contains('open') && logCount > 0) {
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'log-badge';
+            logToggleBtn.appendChild(badge);
+        }
+        badge.textContent = logCount > 9 ? '9+' : logCount;
+    } else if (badge) {
+        badge.remove();
+        logCount = 0;
+    }
+}
+
+logToggleBtn.addEventListener('click', () => {
+    logPanel.classList.toggle('open');
+    if (logPanel.classList.contains('open')) {
+        logPanel.classList.remove('hidden');
+    } else {
+        setTimeout(() => logPanel.classList.add('hidden'), 350);
+    }
+    logCount = 0;
+    updateLogBadge();
+});
+
+$('#log-clear-btn').addEventListener('click', () => {
+    logEntries.innerHTML = '<p class="log-empty">Sin actividad aún</p>';
+    logCount = 0;
+    updateLogBadge();
+});
+$('#log-close-btn').addEventListener('click', () => {
+    logPanel.classList.remove('open');
+    setTimeout(() => logPanel.classList.add('hidden'), 350);
+});
+
+// ACCOUNT SYSTEM
+accountBtn.addEventListener('click', () => {
+    accountModal.classList.remove('hidden');
+    fetchAccountInfo();
+});
+accountCloseBtn.addEventListener('click', () => {
+    accountModal.classList.add('hidden');
+});
+accountModal.addEventListener('click', (e) => {
+    if (e.target === accountModal) accountModal.classList.add('hidden');
+});
+
+async function fetchAccountInfo() {
+    const token = getToken();
+    if (!token) return;
+    accountContent.innerHTML = '<p class="account-loading">⏳ Cargando información...</p>';
+    try {
+        const resp = await fetch(`${API_SERVER}/api/account`, {
+            method: 'GET',
+            headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            renderAccountInfo(data);
+        } else {
+            accountContent.innerHTML = '<p class="account-error">❌ No se pudo cargar la información</p>';
+        }
+    } catch (err) {
+        accountContent.innerHTML = '<p class="account-error">🌐 Error de conexión</p>';
+    }
+}
+
+function renderAccountInfo(data) {
+    const statusColor = data.payment_status === 'Al día' ? '#22c55e' 
+        : data.payment_status.includes('Gracia') ? '#f59e0b' : '#ef4444';
+    const telegramIcon = data.is_telegram_linked ? '✅' : '❌';
+    const docIcon = data.has_transcription_doc ? '✅' : '❌';
+    
+    accountContent.innerHTML = `
+        <div class="account-row"><span class="account-label">📧 Correo</span><span class="account-value">${data.email}</span></div>
+        <div class="account-row"><span class="account-label">📊 Estado de pago</span><span class="account-value" style="color:${statusColor}">${data.payment_status}</span></div>
+        <div class="account-row"><span class="account-label">📅 Próximo corte</span><span class="account-value">${data.next_payment_date}</span></div>
+        <div class="account-row"><span class="account-label">⏳ Días restantes</span><span class="account-value">${data.days_remaining}</span></div>
+        <div class="account-row"><span class="account-label">💳 Último pago</span><span class="account-value">${data.last_payment_date || 'Sin registro'}</span></div>
+        <div class="account-row"><span class="account-label">📱 Telegram</span><span class="account-value">${telegramIcon} ${data.is_telegram_linked ? 'Vinculado' : 'No vinculado'}</span></div>
+        <div class="account-row"><span class="account-label">📄 Doc. transcripciones</span><span class="account-value">${docIcon} ${data.has_transcription_doc ? 'Configurado' : 'Sin configurar'}</span></div>
+        <div class="account-row"><span class="account-label">🟢 Estado</span><span class="account-value">${data.is_active ? 'Activa' : 'Inactiva'}</span></div>
+    `;
+}
+
+// SKINS
 function applySkin(skin) {
-    document.body.classList.remove('skin-dim', 'skin-zen', 'skin-neon', 'skin-studio');
+    document.body.classList.remove('skin-dim', 'skin-zen', 'skin-neon', 'skin-studio', 'skin-stealth');
     if (skin === 'dim')  document.body.classList.add('skin-dim');
     if (skin === 'zen')  document.body.classList.add('skin-zen');
     if (skin === 'neon') document.body.classList.add('skin-neon');
     if (skin === 'studio') document.body.classList.add('skin-studio');
+    if (skin === 'stealth') document.body.classList.add('skin-stealth');
 
     $$('.skin-btn').forEach(btn => btn.classList.remove('active'));
     $(`#skin-${skin}`)?.classList.add('active');
@@ -148,12 +239,10 @@ function applySkin(skin) {
 $('#skin-normal').addEventListener('click', () => applySkin('normal'));
 $('#skin-dim').addEventListener('click',    () => applySkin('dim'));
 $('#skin-zen').addEventListener('click',    () => applySkin('zen'));
-$('#skin-neon').addEventListener('click',   () => applySkin('neon'));
-$('#skin-studio').addEventListener('click', () => applySkin('studio'));
+$('#skin-neon')?.addEventListener('click',   () => applySkin('neon'));
+$('#skin-studio')?.addEventListener('click', () => applySkin('studio'));
+$('#skin-stealth')?.addEventListener('click', () => applySkin('stealth'));
 
-// ═══════════════════════════════════════════════════
-// Timer
-// ═══════════════════════════════════════════════════
 function startTimer() {
     recordStart = Date.now();
     timerEl.textContent = '00:00';
@@ -170,11 +259,7 @@ function stopTimer() {
     timerInterval = null;
 }
 
-// ═══════════════════════════════════════════════════
-// Notifications
-// ═══════════════════════════════════════════════════
 let notifTimeout = null;
-
 function showNotification(type, icon, text, duration = 4000) {
     if (notifTimeout) clearTimeout(notifTimeout);
 
@@ -182,7 +267,6 @@ function showNotification(type, icon, text, duration = 4000) {
     notifIcon.textContent = icon;
     notifText.textContent = text;
 
-    // Force reflow for animation
     void notification.offsetWidth;
     notification.classList.add('visible');
 
@@ -194,15 +278,10 @@ function showNotification(type, icon, text, duration = 4000) {
     }
 }
 
-// ═══════════════════════════════════════════════════
-// Audio Recording
-// ═══════════════════════════════════════════════════
+// AUDIO RECORDING
 recordBtn.addEventListener('click', async () => {
-    if (isRecording) {
-        stopRecording();
-    } else {
-        await startRecording();
-    }
+    if (isRecording) stopRecording();
+    else await startRecording();
 });
 
 discardBtn.addEventListener('click', () => {
@@ -215,21 +294,12 @@ discardBtn.addEventListener('click', () => {
 async function startRecording() {
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
-            audio: {
-                echoCancellation: true,
-                noiseSuppression: true,
-                sampleRate: 44100,
-            } 
+            audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 } 
         });
 
-        // Determine best supported MIME type
-        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-            ? 'audio/webm;codecs=opus'
-            : MediaRecorder.isTypeSupported('audio/webm')
-                ? 'audio/webm'
-                : MediaRecorder.isTypeSupported('audio/mp4')
-                    ? 'audio/mp4'
-                    : ''; // Browser default
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+            : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+            : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : '';
 
         const options = mimeType ? { mimeType } : {};
         mediaRecorder = new MediaRecorder(stream, options);
@@ -240,45 +310,44 @@ async function startRecording() {
         };
 
         mediaRecorder.onstop = () => {
-            // Stop all tracks to release mic
             stream.getTracks().forEach(t => t.stop());
             
             if (discardNext) {
                 discardNext = false;
+                addLog('🗑️', 'Grabación desechada', 'warning');
                 showNotification('warning', '🗑️', 'Grabación desechada', 3000);
                 resetUI();
                 return;
             }
             
+            addLog('⏹️', `Grabación detenida (${timerEl.textContent})`, 'info');
             const ext = mediaRecorder.mimeType.includes('mp4') ? '.mp4' : '.webm';
             const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
             sendAudio(blob, ext);
         };
 
         mediaRecorder.onerror = (e) => {
+            addLog('❌', `Error de grabación: ${e.error?.message}`, 'error');
             showNotification('error', '❌', `Error de grabación: ${e.error?.message || 'desconocido'}`);
             resetUI();
         };
 
-        mediaRecorder.start(1000); // Collect data every 1s
+        mediaRecorder.start(1000); 
         isRecording = true;
         startTimer();
+        addLog('🎙️', 'Grabación iniciada', 'info');
 
-        // Initialize Web Audio API for visualizer
         if (canvasCtx) {
             audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             const source = audioCtx.createMediaStreamSource(stream);
             analyser = audioCtx.createAnalyser();
             analyser.fftSize = 256;
             source.connect(analyser);
-            
             const bufferLength = analyser.frequencyBinCount;
             dataArray = new Uint8Array(bufferLength);
-            
             visualize();
         }
 
-        // Update UI
         recordBtn.classList.add('recording');
         discardBtn.classList.remove('hidden');
         statusIcon.textContent = '🔴';
@@ -302,14 +371,10 @@ function stopRecording() {
     isRecording = false;
     stopTimer();
     
-    // Stop visualizer
     if (drawVisual) cancelAnimationFrame(drawVisual);
     if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
-    if (canvasCtx && canvas) {
-        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    if (canvasCtx && canvas) canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Update UI to sending state
     recordBtn.classList.remove('recording');
     discardBtn.classList.add('hidden');
     
@@ -325,12 +390,9 @@ function resetUI() {
     discardNext = false;
     stopTimer();
     
-    // Stop visualizer
     if (drawVisual) cancelAnimationFrame(drawVisual);
     if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
-    if (canvasCtx && canvas) {
-        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-    }
+    if (canvasCtx && canvas) canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
     
     recordBtn.classList.remove('recording', 'sending');
     discardBtn.classList.add('hidden');
@@ -339,32 +401,22 @@ function resetUI() {
     timerEl.textContent = '00:00';
 }
 
-// ═══════════════════════════════════════════════════
-// Audio Visualizer Loop
-// ═══════════════════════════════════════════════════
 function visualize() {
     if (!isRecording) return;
-    
     drawVisual = requestAnimationFrame(visualize);
     analyser.getByteFrequencyData(dataArray);
 
-    // Calculate average volume
     let sum = 0;
-    for(let i = 0; i < dataArray.length; i++) {
-        sum += dataArray[i];
-    }
+    for(let i = 0; i < dataArray.length; i++) sum += dataArray[i];
     let avgVolume = sum / dataArray.length;
-    let volumeNorm = avgVolume / 256; // 0 to 1
+    let volumeNorm = avgVolume / 256;
 
     canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Only draw if skin is studio to save resources
     if (!document.body.classList.contains('skin-studio')) return;
 
-    // Draw fluid sine waves
     const time = Date.now() / 1000;
     const centerY = canvas.height / 2;
-    
     const waves = [
         { color: 'rgba(94, 106, 210, 0.7)', freq: 0.01, speed: 2, ampOffset: 1 },
         { color: 'rgba(255, 74, 150, 0.7)', freq: 0.015, speed: 3, ampOffset: 0.8 },
@@ -376,14 +428,9 @@ function visualize() {
         canvasCtx.beginPath();
         canvasCtx.lineWidth = 4;
         canvasCtx.strokeStyle = wave.color;
-        
-        // Amplitude responds to volume
         const amplitude = (volumeNorm * 250 * wave.ampOffset) + 10;
-        
         for (let x = 0; x < canvas.width; x += 5) {
-            // Sine wave calculation
             const y = centerY + Math.sin(x * wave.freq + time * wave.speed) * amplitude * Math.sin(x * Math.PI / canvas.width);
-            
             if (x === 0) canvasCtx.moveTo(x, y);
             else canvasCtx.lineTo(x, y);
         }
@@ -392,12 +439,8 @@ function visualize() {
     canvasCtx.globalCompositeOperation = 'source-over';
 }
 
-// ═══════════════════════════════════════════════════
-// Send Audio to Server
-// ═══════════════════════════════════════════════════
 async function sendAudio(blob, ext) {
     const token  = getToken();
-
     if (!token) {
         showNotification('error', '⚙️', 'Token no configurado');
         resetUI();
@@ -405,8 +448,8 @@ async function sendAudio(blob, ext) {
         return;
     }
 
-    // Validate non-empty audio
     if (blob.size < 100) {
+        addLog('⚠️', 'Audio demasiado corto', 'warning');
         showNotification('warning', '⚠️', 'Audio demasiado corto, intenta de nuevo');
         resetUI();
         return;
@@ -414,21 +457,20 @@ async function sendAudio(blob, ext) {
 
     const formData = new FormData();
     formData.append('audio', blob, `recording${ext}`);
+    addLog('📤', 'Enviando audio al servidor...', 'info');
 
     try {
         const response = await fetch(`${API_SERVER}/api/audio`, {
             method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${token}`,
-            },
+            headers: { 'Authorization': `Bearer ${token}` },
             body: formData,
         });
 
         if (response.ok) {
             const data = await response.json();
+            addLog('✅', data.message || 'Audio procesado correctamente', 'success');
             showNotification('success', '✅', data.message || 'Procesado y disponible en tu Google Doc');
         } else {
-            // Parse error for specific debugging
             let errorDetail = '';
             try {
                 const errData = await response.json();
@@ -437,27 +479,29 @@ async function sendAudio(blob, ext) {
                 errorDetail = response.statusText;
             }
 
-            switch (response.status) {
-                case 401:
-                    showNotification('error', '🔑', `Token inválido (401): ${errorDetail}`, 6000);
-                    break;
-                case 400:
-                    showNotification('error', '⚠️', `Solicitud inválida (400): ${errorDetail}`, 6000);
-                    break;
-                case 500:
-                    showNotification('error', '🔥', `Error en el servidor (500): ${errorDetail}`, 6000);
-                    break;
-                default:
-                    showNotification('error', '❌', `Error ${response.status}: ${errorDetail}`, 6000);
+            if (response.status === 401) {
+                addLog('🔑', `Token inválido (401): ${errorDetail}`, 'error');
+                showNotification('error', '🔑', `Token inválido (401): ${errorDetail}`, 6000);
+            } else if (response.status === 400) {
+                addLog('⚠️', `Solicitud inválida (400): ${errorDetail}`, 'error');
+                showNotification('error', '⚠️', `Solicitud inválida (400): ${errorDetail}`, 6000);
+            } else if (response.status === 500) {
+                addLog('🔥', `Error del servidor (500): ${errorDetail}`, 'error');
+                showNotification('error', '🔥', `Error en el servidor (500): ${errorDetail}`, 6000);
+            } else {
+                addLog('❌', `Error ${response.status}: ${errorDetail}`, 'error');
+                showNotification('error', '❌', `Error ${response.status}: ${errorDetail}`, 6000);
             }
         }
     } catch (err) {
-        // Network errors (offline, DNS, CORS, timeout)
         if (!navigator.onLine) {
+            addLog('📡', 'Sin conexión a internet', 'error');
             showNotification('error', '📡', 'Sin conexión a internet', 6000);
         } else if (err.name === 'TypeError' && err.message.includes('fetch')) {
+            addLog('🌐', 'Error de red: no se pudo conectar al servidor', 'error');
             showNotification('error', '🌐', `Error de red: no se pudo conectar al servidor. Verifica la URL.`, 8000);
         } else {
+            addLog('❌', `Error de conexión: ${err.message}`, 'error');
             showNotification('error', '❌', `Error de conexión: ${err.message}`, 6000);
         }
     } finally {
@@ -465,7 +509,4 @@ async function sendAudio(blob, ext) {
     }
 }
 
-// ═══════════════════════════════════════════════════
-// Boot
-// ═══════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', init);

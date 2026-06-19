@@ -14,7 +14,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
     <!-- ═══ Setup Screen (Token Configuration) ═══ -->
@@ -37,6 +37,7 @@
 
                 <button id="save-token-btn" class="btn-primary">Guardar y Conectar</button>
                 <p id="setup-error" class="error-msg"></p>
+                <button id="cancel-setup-btn" class="btn-cancel hidden">Cancelar</button>
             </div>
         </div>
     </div>
@@ -51,8 +52,13 @@
                 <button id="skin-zen" class="skin-btn" title="Modo Zen">🧘</button>
                 <button id="skin-neon" class="skin-btn" title="Modo Neón">⚡</button>
                 <button id="skin-studio" class="skin-btn" title="Modo Studio Pro">🎛️</button>
+                <button id="skin-stealth" class="skin-btn" title="Modo Stealth">👁️‍🗨️</button>
             </div>
-            <button id="settings-btn" class="icon-btn" title="Configuración">⚙️</button>
+            <div class="top-bar-actions">
+                <button id="log-toggle-btn" class="icon-btn" title="Log de actividad">📋</button>
+                <button id="account-btn" class="icon-btn" title="Mi Cuenta">👤</button>
+                <button id="settings-btn" class="icon-btn" title="Configuración">⚙️</button>
+            </div>
         </header>
 
         <!-- Recording Area -->
@@ -87,8 +93,35 @@
             <span id="notification-icon"></span>
             <span id="notification-text"></span>
         </div>
+
+        <!-- Log Panel -->
+        <div id="log-panel" class="log-panel hidden">
+            <div class="log-header">
+                <span>📋 Log de actividad</span>
+                <div class="log-actions">
+                    <button id="log-clear-btn" class="log-action-btn">Limpiar</button>
+                    <button id="log-close-btn" class="log-action-btn">✕</button>
+                </div>
+            </div>
+            <div id="log-entries" class="log-entries">
+                <p class="log-empty">Sin actividad aún</p>
+            </div>
+        </div>
+
+        <!-- Account Modal -->
+        <div id="account-modal" class="account-modal-overlay hidden">
+            <div class="account-card">
+                <div class="account-header">
+                    <span>👤 Mi Cuenta</span>
+                    <button id="account-close-btn" class="log-action-btn">✕</button>
+                </div>
+                <div id="account-content" class="account-content">
+                    <p class="account-loading">Cargando información...</p>
+                </div>
+            </div>
+        </div>
     </div>
 
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>
