@@ -201,7 +201,23 @@ body { font-family: var(--font); background: var(--bg-primary); color: var(--tex
 .record-btn.sending .record-btn-inner { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); animation: spin 1s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
 
-.discard-btn { padding: 14px 28px; border-radius: 30px; border: 2px solid rgba(255, 60, 60, 0.3); background: rgba(255, 60, 60, 0.1); font-size: 16px; font-weight: 600; cursor: pointer; display: flex; align-items: center; gap: 8px; color: #ff4a4a; transition: background var(--transition), transform var(--transition), opacity var(--transition); box-shadow: 0 4px 12px rgba(255, 0, 0, 0.1); -webkit-tap-highlight-color: transparent; }
+.discard-btn {
+    padding: 14px 28px;
+    border-radius: 30px;
+    border: 2px solid rgba(255, 60, 60, 0.3);
+    background: rgba(255, 60, 60, 0.1);
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: #ff4a4a;
+    transition: background var(--transition), transform var(--transition), opacity var(--transition);
+    box-shadow: 0 4px 12px rgba(255, 0, 0, 0.1);
+    -webkit-tap-highlight-color: transparent;
+}
 .discard-btn:active { transform: scale(0.95); background: rgba(255, 60, 60, 0.2); border-color: rgba(255, 60, 60, 0.5); }
 .discard-btn.hidden { display: none; }
 
