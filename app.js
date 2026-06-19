@@ -190,7 +190,10 @@ async function fetchAccountInfo() {
     try {
         const resp = await fetch(`${API_SERVER}/api/account`, {
             method: 'GET',
-            headers: { 'Authorization': `Bearer ${token}` },
+            headers: { 
+                'Authorization': `Bearer ${token}`,
+                'ngrok-skip-browser-warning': 'true'
+            },
         });
         if (resp.ok) {
             const data = await resp.json();
