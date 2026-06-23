@@ -116,6 +116,41 @@ settingsBtn.addEventListener('click', () => {
 });
 
 // LOG SYSTEM
+function hasLogEntries() {
+    return Boolean(logEntries.querySelector('.log-entry'));
+}
+
+function showLogPreview() {
+    logPanel.classList.remove('hidden', 'fullscreen');
+    recorderScreen.classList.add('log-preview-visible');
+    recorderScreen.classList.remove('log-fullscreen-open');
+}
+
+function hideLogPanel() {
+    logPanel.classList.add('hidden');
+    logPanel.classList.remove('fullscreen');
+    recorderScreen.classList.remove('log-preview-visible', 'log-fullscreen-open');
+}
+
+function openLogFullscreen() {
+    logPanel.classList.remove('hidden');
+    logPanel.classList.add('fullscreen');
+    recorderScreen.classList.add('log-fullscreen-open');
+    recorderScreen.classList.remove('log-preview-visible');
+    logCount = 0;
+    updateLogBadge();
+}
+
+function closeLogFullscreen() {
+    logPanel.classList.remove('fullscreen');
+    recorderScreen.classList.remove('log-fullscreen-open');
+    if (hasLogEntries()) {
+        showLogPreview();
+    } else {
+        hideLogPanel();
+    }
+}
+
 function addLog(icon, message, type = 'info') {
     const now = new Date();
     const time = now.toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -127,17 +162,18 @@ function addLog(icon, message, type = 'info') {
     entry.className = `log-entry log-${type}`;
     entry.innerHTML = `<span class="log-time">${time}</span> <span class="log-icon">${icon}</span> <span class="log-msg">${message}</span>`;
     logEntries.prepend(entry);
-    
-    while (logEntries.children.length > 15) {
-        logEntries.removeChild(logEntries.lastChild);
+
+    if (!logPanel.classList.contains('fullscreen')) {
+        showLogPreview();
     }
+
     logCount++;
     updateLogBadge();
 }
 
 function updateLogBadge() {
     let badge = logToggleBtn.querySelector('.log-badge');
-    if (!logPanel.classList.contains('open') && logCount > 0) {
+    if (!logPanel.classList.contains('fullscreen') && logCount > 0) {
         if (!badge) {
             badge = document.createElement('span');
             badge.className = 'log-badge';
@@ -151,24 +187,27 @@ function updateLogBadge() {
 }
 
 logToggleBtn.addEventListener('click', () => {
-    logPanel.classList.toggle('open');
-    if (logPanel.classList.contains('open')) {
-        logPanel.classList.remove('hidden');
+    if (logPanel.classList.contains('fullscreen')) {
+        closeLogFullscreen();
     } else {
-        setTimeout(() => logPanel.classList.add('hidden'), 350);
+        openLogFullscreen();
     }
-    logCount = 0;
-    updateLogBadge();
 });
 
 $('#log-clear-btn').addEventListener('click', () => {
     logEntries.innerHTML = '<p class="log-empty">Sin actividad aún</p>';
     logCount = 0;
+    if (!logPanel.classList.contains('fullscreen')) {
+        hideLogPanel();
+    }
     updateLogBadge();
 });
 $('#log-close-btn').addEventListener('click', () => {
-    logPanel.classList.remove('open');
-    setTimeout(() => logPanel.classList.add('hidden'), 350);
+    if (logPanel.classList.contains('fullscreen')) {
+        closeLogFullscreen();
+    } else {
+        hideLogPanel();
+    }
 });
 
 // ACCOUNT SYSTEM
@@ -472,6 +511,7 @@ async function sendAudio(blob, ext) {
         if (response.ok) {
             const data = await response.json();
             addLog('✅', data.message || 'Audio procesado correctamente', 'success');
+            addLog('📄', 'Transcripción confirmada en el documento de transcripciones', 'success');
             showNotification('success', '✅', data.message || 'Procesado y disponible en tu Google Doc');
         } else {
             let errorDetail = '';

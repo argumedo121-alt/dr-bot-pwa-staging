@@ -23,6 +23,7 @@
     --radius: 16px;
     --transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     --notification-bg: rgba(26, 26, 37, 0.95);
+    --log-preview-height: 216px;
 
     /* Record button sizes */
     --btn-size: 140px;
@@ -181,7 +182,8 @@ body { font-family: var(--font); background: var(--bg-primary); color: var(--tex
 .icon-btn { position: relative; width: 40px; height: 40px; border: none; border-radius: 10px; background: var(--bg-card); font-size: 18px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background var(--transition); }
 .icon-btn:active { background: var(--accent); }
 
-.recording-area { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; gap: 48px; }
+.recording-area { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; gap: 48px; padding: calc(72px + env(safe-area-inset-top, 0px)) 16px calc(32px + env(safe-area-inset-bottom, 0px)); transition: padding-bottom var(--transition), gap var(--transition); }
+#recorder-screen.log-preview-visible .recording-area { padding-bottom: calc(var(--log-preview-height) + 32px + env(safe-area-inset-bottom, 0px)); gap: 32px; }
 .status-container { text-align: center; }
 .status-icon { font-size: 48px; margin-bottom: 16px; transition: opacity var(--transition); }
 .status-text { font-size: 18px; font-weight: 500; color: var(--text-secondary); margin-bottom: 8px; transition: color var(--transition); }
@@ -222,7 +224,8 @@ body { font-family: var(--font); background: var(--bg-primary); color: var(--tex
 .discard-btn.hidden { display: none; }
 
 /* ─── Notifications ─── */
-.notification { position: fixed; bottom: 40px; left: 16px; right: 16px; padding: 16px 20px; border-radius: 14px; background: var(--notification-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; z-index: 20; transform: translateY(20px); opacity: 0; transition: transform 0.4s ease, opacity 0.4s ease; }
+.notification { position: fixed; bottom: 40px; left: 16px; right: 16px; padding: 16px 20px; border-radius: 14px; background: var(--notification-bg); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; z-index: 20; transform: translateY(20px); opacity: 0; transition: bottom var(--transition), transform 0.4s ease, opacity 0.4s ease; }
+#recorder-screen.log-preview-visible .notification { bottom: calc(var(--log-preview-height) + 28px + env(safe-area-inset-bottom, 0px)); }
 .notification.visible { transform: translateY(0); opacity: 1; }
 .notification.hidden { display: none; }
 .notification.success { border-color: rgba(34, 197, 94, 0.2); color: var(--success); }
@@ -257,32 +260,45 @@ body.skin-studio .record-btn.sending::after { content: 'PROCESANDO...'; animatio
 body.skin-studio .discard-btn { width: 60px; height: 60px; padding: 0; flex-shrink: 0; border-radius: 50%; margin: 0; box-shadow: none; background: rgba(255,255,255,0.05); font-size: 0; }
 body.skin-studio .discard-btn .discard-icon { margin: 0; font-size: 24px; }
 
+body.skin-studio #recorder-screen.log-preview-visible .controls,
+body.skin-stealth #recorder-screen.log-preview-visible .controls {
+    bottom: calc(var(--log-preview-height) + 56px + env(safe-area-inset-bottom, 0px));
+}
+
 
 /* ═══ LOG PANEL ═══ */
 .log-panel {
     position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    max-height: 45vh;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 12px;
+    right: 12px;
+    height: var(--log-preview-height);
+    max-height: 34vh;
     background: rgba(10, 10, 15, 0.97);
     backdrop-filter: blur(16px);
     -webkit-backdrop-filter: blur(16px);
-    border-top: 1px solid var(--border);
-    transform: translateY(100%);
-    transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    border: 1px solid var(--border);
     z-index: 30;
     display: flex;
     flex-direction: column;
-    border-radius: 16px 16px 0 0;
+    overflow: hidden;
+    border-radius: 14px;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
 }
-.log-panel.open { transform: translateY(0); }
+.log-panel.fullscreen {
+    inset: 0;
+    height: auto;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+    z-index: 60;
+}
 .log-panel.hidden { display: none; }
 .log-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 14px 16px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border);
     font-size: 13px;
     font-weight: 600;
@@ -290,17 +306,23 @@ body.skin-studio .discard-btn .discard-icon { margin: 0; font-size: 24px; }
     letter-spacing: 0.5px;
     flex-shrink: 0;
 }
+.log-panel.fullscreen .log-header { padding: calc(14px + env(safe-area-inset-top, 0px)) 16px 14px; }
 .log-actions { display: flex; gap: 8px; }
 .log-action-btn {
     background: none; border: 1px solid var(--border); color: var(--text-secondary);
     font-family: var(--font); font-size: 12px; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.2s;
 }
 .log-action-btn:hover { border-color: var(--text-secondary); color: var(--text-primary); }
-.log-entries { overflow-y: auto; flex: 1; padding: 8px 0; }
+.log-entries { overflow-y: auto; flex: 1; padding: 4px 0; }
+.log-panel:not(.fullscreen) .log-entries { overflow: hidden; }
 .log-entry {
-    display: flex; align-items: flex-start; gap: 8px; padding: 8px 16px; font-size: 12px; line-height: 1.4;
+    display: flex; align-items: flex-start; gap: 8px; min-height: 32px; padding: 6px 14px; font-size: 12px; line-height: 1.4;
     border-bottom: 1px solid rgba(255,255,255,0.02); animation: logSlideIn 0.2s ease;
 }
+.log-panel.fullscreen .log-entry { padding: 8px 16px; }
+.log-panel.fullscreen .log-entries { padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+.log-panel:not(.fullscreen) .log-entry:nth-of-type(n+6) { display: none; }
+.log-panel:not(.fullscreen) .log-msg { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @keyframes logSlideIn { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: translateY(0); } }
 .log-time { color: var(--text-muted, #555); font-variant-numeric: tabular-nums; flex-shrink: 0; font-size: 11px; }
 .log-icon { flex-shrink: 0; font-size: 13px; }
