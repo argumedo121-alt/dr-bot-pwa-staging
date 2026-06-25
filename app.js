@@ -500,7 +500,6 @@ async function sendAudio(blob, ext) {
     const formData = new FormData();
     formData.append('audio', blob, `recording${ext}`);
     addLog('📤', 'Enviando audio al servidor...', 'info');
-    addLog('⏳', 'Audio enviado, esperando confirmación...', 'info');
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos de timeout
@@ -516,9 +515,36 @@ async function sendAudio(blob, ext) {
 
         if (response.ok) {
             const data = await response.json();
-            const confirmationMessage = data.message || 'Transcripción escrita en Google Doc';
-            addLog('📄', confirmationMessage, 'success');
-            showNotification('success', '✅', confirmationMessage);
+            const initialMessage = data.message || 'Audio recibido, iniciando procesamiento...';
+            addLog('📥', initialMessage, 'info');
+
+            if (data.job_id) {
+                const eventSource = new EventSource(`${API_SERVER}/api/audio/status/${data.job_id}`);
+                
+                eventSource.onmessage = function(event) {
+                    const statusData = JSON.parse(event.data);
+                    
+                    if (statusData.status === 'completed') {
+                        addLog('📄', statusData.message || 'Transcripción escrita en Google Doc', 'success');
+                        showNotification('success', '✅', statusData.message || 'Transcripción escrita en Google Doc');
+                        eventSource.close();
+                    } else if (statusData.status === 'failed') {
+                        addLog('❌', statusData.message || 'Error procesando audio', 'error');
+                        showNotification('error', '❌', statusData.message || 'Error procesando audio');
+                        eventSource.close();
+                    } else if (statusData.status === 'processing') {
+                        // Opcional: mostrar log intermedio si se desea
+                    }
+                };
+                
+                eventSource.onerror = function() {
+                    addLog('⚠️', 'Conexión con el servidor para actualizaciones interrumpida.', 'warning');
+                    eventSource.close();
+                };
+            } else {
+                addLog('📄', 'Transcripción procesada', 'success');
+                showNotification('success', '✅', 'Transcripción procesada');
+            }
         } else {
             let errorDetail = '';
             try {
