@@ -500,6 +500,7 @@ async function sendAudio(blob, ext) {
     const formData = new FormData();
     formData.append('audio', blob, `recording${ext}`);
     addLog('📤', 'Enviando audio al servidor...', 'info');
+    addLog('⏳', 'Audio enviado, esperando confirmación...', 'info');
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos de timeout
