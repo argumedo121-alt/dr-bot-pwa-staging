@@ -501,12 +501,17 @@ async function sendAudio(blob, ext) {
     formData.append('audio', blob, `recording${ext}`);
     addLog('📤', 'Enviando audio al servidor...', 'info');
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos de timeout
+
     try {
         const response = await fetch(`${API_SERVER}/api/audio`, {
             method: 'POST',
             headers: { 'Authorization': `Bearer ${token}` },
             body: formData,
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (response.ok) {
             const data = await response.json();
@@ -537,7 +542,11 @@ async function sendAudio(blob, ext) {
             }
         }
     } catch (err) {
-        if (!navigator.onLine) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+            addLog('⏱️', 'El servidor tardó demasiado en responder (timeout).', 'error');
+            showNotification('error', '⏱️', 'El servidor tardó demasiado en procesar tu audio.', 6000);
+        } else if (!navigator.onLine) {
             addLog('📡', 'Sin conexión a internet', 'error');
             showNotification('error', '📡', 'Sin conexión a internet', 6000);
         } else if (err.name === 'TypeError' && err.message.includes('fetch')) {
