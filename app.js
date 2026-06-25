@@ -515,32 +515,55 @@ async function sendAudio(blob, ext) {
 
         if (response.ok) {
             const data = await response.json();
-            const initialMessage = data.message || 'Audio recibido, iniciando procesamiento...';
+            const initialMessage = data.message || 'Audio recibido, procesando con Gemini...';
             addLog('📥', initialMessage, 'info');
 
             if (data.job_id) {
-                const eventSource = new EventSource(`${API_SERVER}/api/audio/status/${data.job_id}`);
-                
-                eventSource.onmessage = function(event) {
-                    const statusData = JSON.parse(event.data);
+                try {
+                    const statusResponse = await fetch(`${API_SERVER}/api/audio/status/${data.job_id}`, {
+                        headers: { 'ngrok-skip-browser-warning': 'true' }
+                    });
                     
-                    if (statusData.status === 'completed') {
-                        addLog('📄', statusData.message || 'Transcripción escrita en Google Doc', 'success');
-                        showNotification('success', '✅', statusData.message || 'Transcripción escrita en Google Doc');
-                        eventSource.close();
-                    } else if (statusData.status === 'failed') {
-                        addLog('❌', statusData.message || 'Error procesando audio', 'error');
-                        showNotification('error', '❌', statusData.message || 'Error procesando audio');
-                        eventSource.close();
-                    } else if (statusData.status === 'processing') {
-                        // Opcional: mostrar log intermedio si se desea
+                    if (!statusResponse.ok) {
+                        throw new Error('Error de conexión SSE');
                     }
-                };
-                
-                eventSource.onerror = function() {
+
+                    const reader = statusResponse.body.getReader();
+                    const decoder = new TextDecoder("utf-8");
+                    let buffer = '';
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        let parts = buffer.split('\n\n');
+                        buffer = parts.pop();
+
+                        for (let part of parts) {
+                            if (part.startsWith('data: ')) {
+                                try {
+                                    const statusData = JSON.parse(part.substring(6));
+                                    if (statusData.status === 'completed') {
+                                        addLog('📄', statusData.message || 'Transcripción escrita en Google Doc', 'success');
+                                        showNotification('success', '✅', statusData.message || 'Transcripción escrita');
+                                        reader.cancel();
+                                        return;
+                                    } else if (statusData.status === 'failed') {
+                                        addLog('❌', statusData.message || 'Error procesando audio', 'error');
+                                        showNotification('error', '❌', statusData.message || 'Error');
+                                        reader.cancel();
+                                        return;
+                                    }
+                                } catch (e) {
+                                    console.error('SSE Parse error', e);
+                                }
+                            }
+                        }
+                    }
+                } catch (err) {
                     addLog('⚠️', 'Conexión con el servidor para actualizaciones interrumpida.', 'warning');
-                    eventSource.close();
-                };
+                }
             } else {
                 addLog('📄', 'Transcripción procesada', 'success');
                 showNotification('success', '✅', 'Transcripción procesada');
