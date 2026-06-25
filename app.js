@@ -510,9 +510,9 @@ async function sendAudio(blob, ext) {
 
         if (response.ok) {
             const data = await response.json();
-            addLog('✅', data.message || 'Audio procesado correctamente', 'success');
-            addLog('📄', 'Transcripción confirmada en el documento de transcripciones', 'success');
-            showNotification('success', '✅', data.message || 'Procesado y disponible en tu Google Doc');
+            const confirmationMessage = data.message || 'Transcripción escrita en Google Doc';
+            addLog('📄', confirmationMessage, 'success');
+            showNotification('success', '✅', confirmationMessage);
         } else {
             let errorDetail = '';
             try {
