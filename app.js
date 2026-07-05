@@ -363,7 +363,14 @@ recordBtn.addEventListener('click', async () => {
 });
 
 discardBtn.addEventListener('click', () => {
+    // Modo 1: estado .failed terminal → descartar definitivo.
     if (recordBtn.classList.contains('failed')) { manualDiscard(); return; }
+    // Modo 2: reintento en background → señalar cancelación para el orquestador.
+    if (discardBtn.classList.contains('background-discard')) {
+        userCancelledSend = true;
+        return;
+    }
+    // Modo 3: grabando → descartar la grabación en curso.
     if (isRecording) {
         discardNext = true;
         stopRecording();
@@ -597,11 +604,22 @@ async function sendAudio(blob, ext) {
     }
 
     // Orquestación de reintentos con backoff exponencial.
-    // El médico no toca nada: los microcortes se resuelven solos.
+    // - Microcortes transitorios: el médico no toca nada, se resuelven solos.
+    // - Sin señal persistente: el Descartar aparece desde el primer fallo para que el médico
+    //   decida irse al Google Doc ya, sin esperar a que terminen los reintentos automáticos.
     const BACKOFF_MS = [2000, 5000, 15000]; // 3 reintentos automáticos
     let attempt = 0;
+    userCancelledSend = false; // reset por si viene de un envío anterior
 
     while (true) {
+        if (userCancelledSend) {
+            // El médico tocó Descartar durante un reintento en background.
+            addLog('🗑️', 'Envío cancelado por el médico', 'warning');
+            clearFailedState();
+            resetUI();
+            return;
+        }
+
         const result = await attemptSend(blob, ext, token);
         attempt++;
 
@@ -643,11 +661,25 @@ async function sendAudio(blob, ext) {
         }
 
         // outcome === 'retryable'
+        // Fail-fast cuando sabemos que estamos offline: no tiene sentido esperar backoff.
+        // El médico ve el estado .failed de inmediato.
+        if (result.offline) {
+            addLog('⚠️', result.message || 'Sin conexión.', 'error');
+            showNotification('error', '📡', 'Sin conexión. Reintentar o descartar para escribir tú.', 8000);
+            pendingSend = { blob, ext };
+            setFailedState('Sin conexión. Toca reintentar o descartar.');
+            return;
+        }
+
         if (attempt <= BACKOFF_MS.length) {
             const wait = BACKOFF_MS[attempt - 1];
             addLog('🔄', `Reintento ${attempt}/${BACKOFF_MS.length} en ${wait / 1000}s…`, 'warning');
-            // Estado visible durante el backoff: seguimos en "sending" (el médico ve que algo pasa).
+            // Estado visible: además del log, mostramos el progreso en el status-text
+            // y dejamos el Descartar disponible por si el médico no quiere esperar.
+            statusText.textContent = `Reintentando ${attempt}/${BACKOFF_MS.length}… (toca Descartar para escribir tú)`;
+            showBackgroundDiscard();
             await new Promise(r => setTimeout(r, wait));
+            hideBackgroundDiscard();
             continue;
         }
 
@@ -660,10 +692,30 @@ async function sendAudio(blob, ext) {
     }
 }
 
+// Flag que el médico puede activar con Descartar durante un reintento en background.
+let userCancelledSend = false;
+
+// Muestra un Descartar "background" durante los reintentos automáticos (sin abandonar el envío).
+// Reusa el botón secundario con un texto distinto.
+function showBackgroundDiscard() {
+    discardBtn.classList.remove('hidden');
+    discardBtn.setAttribute('aria-label', 'Descartar envío');
+    discardBtn.querySelector('.discard-icon').textContent = '🗑️';
+    discardBtn.lastChild.textContent = ' Descartar';
+    discardBtn.classList.add('background-discard');
+}
+function hideBackgroundDiscard() {
+    discardBtn.classList.add('hidden');
+    discardBtn.classList.remove('background-discard');
+    discardBtn.setAttribute('aria-label', 'Desechar');
+    discardBtn.lastChild.textContent = ' Cancelar';
+}
+
 // Reintento manual: el médico tocó el botón secundario en estado .failed.
 async function manualRetry() {
     if (!pendingSend) return;
     const { blob, ext } = pendingSend;
+    userCancelledSend = false;
     recordBtn.classList.remove('failed');
     recordBtn.classList.add('sending');
     discardBtn.classList.add('hidden');
@@ -674,9 +726,11 @@ async function manualRetry() {
 
 // Descarte limpio: el médico decide irse al Google Doc.
 function manualDiscard() {
+    userCancelledSend = true; // por si hay un reintento en background aún corriendo
     addLog('🗑️', 'Envío cancelado por el médico', 'warning');
     showNotification('warning', '🗑️', 'Envío cancelado. Puedes escribir directamente en el Google Doc.', 4000);
     clearFailedState();
+    hideBackgroundDiscard();
     resetUI();
 }
 
@@ -692,12 +746,29 @@ function manualDiscard() {
  *   'retryable'      → fallo de red / timeout / 5xx / 4xx (excepto 401) / SSE caído
  */
 async function attemptSend(blob, ext, token) {
+    // Fail-fast explícito: si el navegador ya sabe que estamos offline, no lanzamos fetch
+    // (en móvil un fetch sin ruta puede quedar colgado decenas de segundos antes de fallar).
+    if (!navigator.onLine) {
+        addLog('📡', 'Sin conexión a internet', 'warning');
+        return { outcome: 'retryable', message: 'Sin conexión a internet.', offline: true };
+    }
+
     const formData = new FormData();
     formData.append('audio', blob, `recording${ext}`);
     addLog('📤', 'Enviando audio al servidor...', 'info');
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 min para el upload
+    // Timeout de CONEXIÓN corto: si en 8s no llegó respuesta HTTP, abortamos.
+    // Esto es lo que detecta "sin señal persistente" rápido en vez de quedar colgado.
+    // (El upload en sí, una vez establecida la conexión, puede tardar hasta 10 min.)
+    const CONNECTION_TIMEOUT_MS = 8000;
+    const UPLOAD_TIMEOUT_MS = 600000;
+    let connectionSettled = false;
+    const connectionTimer = setTimeout(() => {
+        if (!connectionSettled) controller.abort();
+    }, CONNECTION_TIMEOUT_MS);
+    // Timer de respaldo para el cuerpo completo del upload (10 min).
+    const uploadTimer = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);
 
     try {
         const response = await fetch(`${API_SERVER}/api/audio`, {
@@ -706,10 +777,12 @@ async function attemptSend(blob, ext, token) {
             body: formData,
             signal: controller.signal
         });
-        clearTimeout(timeoutId);
+        connectionSettled = true;     // llegó respuesta HTTP → ya hay conexión
+        clearTimeout(connectionTimer);
 
         if (response.ok) {
             const data = await response.json();
+            clearTimeout(uploadTimer);
             const initialMessage = data.message || 'Audio recibido, procesando con Gemini...';
             addLog('📥', initialMessage, 'info');
 
@@ -725,6 +798,7 @@ async function attemptSend(blob, ext, token) {
             return { outcome: 'retryable', message: 'Conexión interrumpida mientras se procesaba el audio.' };
         }
 
+        clearTimeout(uploadTimer);
         // Respuesta de error del servidor.
         let errorDetail = '';
         try {
@@ -746,12 +820,18 @@ async function attemptSend(blob, ext, token) {
         addLog('❌', `${label}: ${errorDetail}`, 'error');
         return { outcome: 'retryable', message: `${label}: ${errorDetail}` };
     } catch (err) {
-        clearTimeout(timeoutId);
+        clearTimeout(connectionTimer);
+        clearTimeout(uploadTimer);
         if (err.name === 'AbortError') {
-            return { outcome: 'retryable', message: 'Timeout: el servidor tardó demasiado.' };
+            // Si abortó antes de tener respuesta HTTP, fue el timeout de CONEXIÓN (8s):
+            // señal persistente mala. Mensaje claro para el médico.
+            const msg = connectionSettled
+                ? 'Timeout: el servidor tardó demasiado en procesar.'
+                : 'Sin señal: no se pudo establecer conexión.';
+            return { outcome: 'retryable', message: msg, offline: !connectionSettled };
         }
         if (!navigator.onLine) {
-            return { outcome: 'retryable', message: 'Sin conexión a internet.' };
+            return { outcome: 'retryable', message: 'Sin conexión a internet.', offline: true };
         }
         if (err.name === 'TypeError' && err.message.includes('fetch')) {
             return { outcome: 'retryable', message: 'No se pudo conectar al servidor.' };
