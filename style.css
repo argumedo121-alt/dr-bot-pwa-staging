@@ -131,6 +131,11 @@ body.skin-stealth .record-btn.recording::before {
 body.skin-stealth .record-btn.sending { background: rgba(26, 58, 92, 0.2); opacity: 0.5; }
 body.skin-stealth .record-btn.sending::after { content: 'PROCESANDO...'; color: #445; }
 
+body.skin-stealth .record-btn.failed { background: rgba(120, 30, 30, 0.25); }
+body.skin-stealth .record-btn.failed::after { content: 'REINTENTAR ENVÍO'; color: #855; }
+body.skin-stealth .record-btn.status-success { border-color: transparent; box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.4); }
+body.skin-stealth .record-btn.status-failed { border-color: transparent; box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.4); }
+
 body.skin-stealth .discard-btn {
     width: 56px; height: 56px; padding: 0; flex-shrink: 0; border-radius: 50%;
     margin: 0; box-shadow: none; background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.04); font-size: 0;
@@ -190,7 +195,7 @@ body { font-family: var(--font); background: var(--bg-primary); color: var(--tex
 .timer { font-size: 40px; font-weight: 300; font-variant-numeric: tabular-nums; color: var(--text-primary); letter-spacing: 2px; transition: opacity var(--transition), color var(--transition); }
 
 .controls { display: flex; flex-direction: column; align-items: center; gap: 32px; }
-.record-btn { position: relative; width: var(--btn-size); height: var(--btn-size); border-radius: 50%; border: 3px solid var(--text-secondary); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color var(--transition); -webkit-tap-highlight-color: transparent; }
+.record-btn { position: relative; width: var(--btn-size); height: var(--btn-size); border-radius: 50%; border: 3px solid var(--accent); background: transparent; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: border-color var(--transition); -webkit-tap-highlight-color: transparent; }
 .record-btn-inner { width: var(--btn-inner); height: var(--btn-inner); border-radius: 50%; background: var(--record-color); transition: width var(--transition), height var(--transition), border-radius var(--transition), background var(--transition); }
 .record-btn-pulse { position: absolute; width: 100%; height: 100%; border-radius: 50%; background: var(--record-glow); opacity: 0; animation: none; pointer-events: none; }
 
@@ -202,6 +207,16 @@ body { font-family: var(--font); background: var(--bg-primary); color: var(--tex
 .record-btn.sending { border-color: var(--accent); pointer-events: none; opacity: 0.6; }
 .record-btn.sending .record-btn-inner { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); animation: spin 1s linear infinite; }
 @keyframes spin { 100% { transform: rotate(360deg); } }
+
+/* Estado .failed: envío fallido tras reintentos. Botón grande = Reintentar. */
+.record-btn.failed { border-color: var(--error); }
+.record-btn.failed .record-btn-inner { width: 40px; height: 40px; border-radius: 50%; background: var(--error); opacity: 0.8; animation: pulse 2s ease-in-out infinite; }
+.record-btn.failed .record-btn-pulse { animation: pulse 2s ease-in-out infinite; }
+
+/* Memoria del último resultado (color del borde en reposo).
+   Especificidad: gana sobre el borde default; .recording/.sending/.failed la overridean activamente. */
+.record-btn.status-success { border-color: var(--success); }
+.record-btn.status-failed { border-color: var(--error); }
 
 .discard-btn {
     padding: 14px 28px;
@@ -257,6 +272,11 @@ body.skin-studio .record-btn.recording::after { content: 'DETENER Y ENVIAR'; }
 @keyframes studioPulseRecord { 0% { box-shadow: 0 0 0 0 rgba(255, 74, 74, 0.4); } 70% { box-shadow: 0 0 0 15px rgba(255, 74, 74, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 74, 74, 0); } }
 body.skin-studio .record-btn.sending { background: var(--accent); opacity: 0.7; }
 body.skin-studio .record-btn.sending::after { content: 'PROCESANDO...'; animation: pulse 1s infinite alternate; }
+
+body.skin-studio .record-btn.failed { background: #b93535; box-shadow: 0 8px 24px rgba(185, 53, 53, 0.4); }
+body.skin-studio .record-btn.failed::after { content: 'REINTENTAR ENVÍO'; }
+body.skin-studio .record-btn.status-success { background: #2f9e57; box-shadow: 0 8px 24px rgba(47, 158, 87, 0.35); }
+body.skin-studio .record-btn.status-failed { background: #b93535; box-shadow: 0 8px 24px rgba(185, 53, 53, 0.35); }
 body.skin-studio .discard-btn { width: 60px; height: 60px; padding: 0; flex-shrink: 0; border-radius: 50%; margin: 0; box-shadow: none; background: rgba(255,255,255,0.05); font-size: 0; }
 body.skin-studio .discard-btn .discard-icon { margin: 0; font-size: 24px; }
 

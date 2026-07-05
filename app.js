@@ -95,17 +95,52 @@ function init() {
     applySkin(getSkin());
 }
 
-saveTokenBtn.addEventListener('click', () => {
+saveTokenBtn.addEventListener('click', async () => {
     const token  = tokenInput.value.trim();
     setupError.textContent = '';
     if (!token) {
         setupError.textContent = '❌ Ingresa tu token de acceso';
         return;
     }
-    saveConfig(token);
-    cancelSetupBtn.classList.add('hidden');
-    showRecorder();
-    showNotification('success', '✅', 'Configuración guardada');
+
+    // Validación contra el backend antes de aceptar el token.
+    const originalText = saveTokenBtn.textContent;
+    saveTokenBtn.disabled = true;
+    saveTokenBtn.textContent = 'Verificando…';
+
+    try {
+        const resp = await fetch(`${API_SERVER}/api/account`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'ngrok-skip-browser-warning': 'true'
+            },
+        });
+
+        if (resp.ok) {
+            saveConfig(token);
+            cancelSetupBtn.classList.add('hidden');
+            showRecorder();
+            showNotification('success', '✅', 'Token válido. Conectado');
+        } else if (resp.status === 401) {
+            setupError.textContent = '❌ Token inválido. Revísalo e intenta de nuevo.';
+        } else {
+            // Error del servidor (5xx, etc.): no concluimos que el token esté mal.
+            saveConfig(token);
+            cancelSetupBtn.classList.add('hidden');
+            showRecorder();
+            showNotification('warning', '⚠️', 'No se pudo verificar el token, pero se guardó. Si falla, revisa tu conexión.');
+        }
+    } catch (err) {
+        // Error de red: mantenemos el token (podría ser válido) y dejamos avanzar al médico.
+        saveConfig(token);
+        cancelSetupBtn.classList.add('hidden');
+        showRecorder();
+        showNotification('warning', '🌐', 'Sin conexión para verificar el token. Se guardó; verifícalo si falla.');
+    } finally {
+        saveTokenBtn.disabled = false;
+        saveTokenBtn.textContent = originalText;
+    }
 });
 
 cancelSetupBtn.addEventListener('click', showRecorder);
@@ -322,11 +357,13 @@ function showNotification(type, icon, text, duration = 4000) {
 
 // AUDIO RECORDING
 recordBtn.addEventListener('click', async () => {
+    if (recordBtn.classList.contains('failed')) { manualRetry(); return; }
     if (isRecording) stopRecording();
     else await startRecording();
 });
 
 discardBtn.addEventListener('click', () => {
+    if (recordBtn.classList.contains('failed')) { manualDiscard(); return; }
     if (isRecording) {
         discardNext = true;
         stopRecording();
@@ -416,6 +453,7 @@ function stopRecording() {
     if (drawVisual) cancelAnimationFrame(drawVisual);
     if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
     if (canvasCtx && canvas) canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+    clearMicFeedback();
 
     recordBtn.classList.remove('recording');
     discardBtn.classList.add('hidden');
@@ -435,12 +473,19 @@ function resetUI() {
     if (drawVisual) cancelAnimationFrame(drawVisual);
     if (audioCtx && audioCtx.state !== 'closed') audioCtx.close();
     if (canvasCtx && canvas) canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-    
+    clearMicFeedback();
+
     recordBtn.classList.remove('recording', 'sending');
     discardBtn.classList.add('hidden');
     statusIcon.textContent = '🎙️';
     statusText.textContent = 'Toca para grabar';
     timerEl.textContent = '00:00';
+}
+
+function clearMicFeedback() {
+    // Limpia los estilos inline aplicados al status-icon por el feedback de skins sobrias.
+    statusIcon.style.opacity = '';
+    statusIcon.style.transform = '';
 }
 
 function visualize() {
@@ -453,9 +498,24 @@ function visualize() {
     let avgVolume = sum / dataArray.length;
     let volumeNorm = avgVolume / 256;
 
-    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-    
+    const isZen     = document.body.classList.contains('skin-zen');
+    const isStealth = document.body.classList.contains('skin-stealth');
+
+    // Skins sobrias: feedback mínimo vía el icono de estado (sin dibujar en canvas),
+    // para que el médico sepa que el micrófono está captando. Preserva la estética.
+    if (isZen || isStealth) {
+        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+        const intensity = Math.min(1, volumeNorm * 3); // amplifica la señal útil
+        statusIcon.style.opacity  = (0.2 + intensity * 0.5).toFixed(2);
+        statusIcon.style.transform = `scale(${(1 + intensity * 0.25).toFixed(3)})`;
+        return;
+    }
+
     if (!document.body.classList.contains('skin-studio')) return;
+
+    // Limpia los estilos inline aplicados en skins sobrias si se rotó de skin en caliente.
+    statusIcon.style.opacity = '';
+    statusIcon.style.transform = '';
 
     const time = Date.now() / 1000;
     const centerY = canvas.height / 2;
@@ -465,6 +525,7 @@ function visualize() {
         { color: 'rgba(74, 255, 200, 0.7)', freq: 0.008, speed: 1.5, ampOffset: 1.2 }
     ];
 
+    canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
     canvasCtx.globalCompositeOperation = 'screen';
     waves.forEach(wave => {
         canvasCtx.beginPath();
@@ -479,6 +540,44 @@ function visualize() {
         canvasCtx.stroke();
     });
     canvasCtx.globalCompositeOperation = 'source-over';
+}
+
+// ─── Send status (color del botón en reposo) ───
+// 'virgin' (azul, default) | 'success' (verde) | 'failed' (rojo)
+let lastSendStatus = 'virgin';
+
+function setButtonStatus(status) {
+    lastSendStatus = status;
+    recordBtn.classList.remove('status-success', 'status-failed');
+    if (status === 'success') recordBtn.classList.add('status-success');
+    else if (status === 'failed') recordBtn.classList.add('status-failed');
+}
+
+// ─── Failed state UI (reintento manual / descartar) ───
+let pendingSend = null; // { blob, ext } de la grabación que está en reintento
+
+function setFailedState(message) {
+    recordBtn.classList.remove('sending');
+    recordBtn.classList.add('failed');
+    recordBtn.setAttribute('aria-label', 'Reintentar envío');
+    statusIcon.textContent = '⚠️';
+    statusText.textContent = message || 'Sin conexión. Toca reintentar o descartar.';
+    // En .failed: el botón grande = "Reintentar", el botón secundario = "Descartar".
+    discardBtn.classList.remove('hidden');
+    discardBtn.setAttribute('aria-label', 'Descartar envío');
+    discardBtn.querySelector('.discard-icon').textContent = '🗑️';
+    discardBtn.lastChild.textContent = ' Descartar';
+    setButtonStatus('failed');
+}
+
+function clearFailedState() {
+    recordBtn.classList.remove('failed');
+    recordBtn.setAttribute('aria-label', 'Grabar');
+    discardBtn.classList.add('hidden');
+    discardBtn.setAttribute('aria-label', 'Desechar');
+    discardBtn.querySelector('.discard-icon').textContent = '🗑️';
+    discardBtn.lastChild.textContent = ' Cancelar';
+    pendingSend = null;
 }
 
 async function sendAudio(blob, ext) {
@@ -497,12 +596,108 @@ async function sendAudio(blob, ext) {
         return;
     }
 
+    // Orquestación de reintentos con backoff exponencial.
+    // El médico no toca nada: los microcortes se resuelven solos.
+    const BACKOFF_MS = [2000, 5000, 15000]; // 3 reintentos automáticos
+    let attempt = 0;
+
+    while (true) {
+        const result = await attemptSend(blob, ext, token);
+        attempt++;
+
+        if (result.outcome === 'completed') {
+            addLog('📄', result.message || 'Transcripción escrita en Google Doc', 'success');
+            showNotification('success', '✅', result.message || 'Transcripción escrita');
+            setButtonStatus('success');
+            clearFailedState();
+            resetUI();
+            return;
+        }
+        if (result.outcome === 'processing-done') {
+            // El backend procesó sin SSE/job_id; asumimos éxito.
+            addLog('📄', 'Transcripción procesada', 'success');
+            showNotification('success', '✅', 'Transcripción procesada');
+            setButtonStatus('success');
+            clearFailedState();
+            resetUI();
+            return;
+        }
+        if (result.outcome === 'failed-job') {
+            // El servidor respondió pero el job reportó fallo: no reintentar (no es de red).
+            addLog('❌', result.message || 'Error procesando audio', 'error');
+            showNotification('error', '❌', result.message || 'Error', 6000);
+            setButtonStatus('failed');
+            clearFailedState();
+            resetUI();
+            return;
+        }
+        if (result.outcome === 'auth-error') {
+            // 401: token malo, no reintentar.
+            addLog('🔑', `Token inválido (401): ${result.message}`, 'error');
+            showNotification('error', '🔑', `Token inválido (401): ${result.message}`, 6000);
+            setButtonStatus('failed');
+            clearFailedState();
+            resetUI();
+            showSetup();
+            return;
+        }
+
+        // outcome === 'retryable'
+        if (attempt <= BACKOFF_MS.length) {
+            const wait = BACKOFF_MS[attempt - 1];
+            addLog('🔄', `Reintento ${attempt}/${BACKOFF_MS.length} en ${wait / 1000}s…`, 'warning');
+            // Estado visible durante el backoff: seguimos en "sending" (el médico ve que algo pasa).
+            await new Promise(r => setTimeout(r, wait));
+            continue;
+        }
+
+        // Reintentos automáticos agotados → ceder el control al médico.
+        addLog('⚠️', result.message || 'No se pudo enviar tras varios intentos.', 'error');
+        showNotification('error', '⚠️', 'Sin conexión. Reintentar o descartar para escribir tú.', 8000);
+        pendingSend = { blob, ext };
+        setFailedState();
+        return;
+    }
+}
+
+// Reintento manual: el médico tocó el botón secundario en estado .failed.
+async function manualRetry() {
+    if (!pendingSend) return;
+    const { blob, ext } = pendingSend;
+    recordBtn.classList.remove('failed');
+    recordBtn.classList.add('sending');
+    discardBtn.classList.add('hidden');
+    statusIcon.textContent = '📤';
+    statusText.textContent = 'Reintentando envío…';
+    await sendAudio(blob, ext);
+}
+
+// Descarte limpio: el médico decide irse al Google Doc.
+function manualDiscard() {
+    addLog('🗑️', 'Envío cancelado por el médico', 'warning');
+    showNotification('warning', '🗑️', 'Envío cancelado. Puedes escribir directamente en el Google Doc.', 4000);
+    clearFailedState();
+    resetUI();
+}
+
+/**
+ * Un solo intent de envío + escucha del SSE de estado.
+ * Devuelve un resultado estructurado; la orquestación de reintentos vive en sendAudio().
+ *
+ * outcomes:
+ *   'completed'      → job reportó transcripción OK
+ *   'processing-done'→ respuesta OK sin job_id (backend síncrono)
+ *   'failed-job'     → job reportó fallo (no reintentar)
+ *   'auth-error'     → 401 (no reintentar)
+ *   'retryable'      → fallo de red / timeout / 5xx / 4xx (excepto 401) / SSE caído
+ */
+async function attemptSend(blob, ext, token) {
     const formData = new FormData();
     formData.append('audio', blob, `recording${ext}`);
     addLog('📤', 'Enviando audio al servidor...', 'info');
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutos de timeout
+    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 min para el upload
 
     try {
         const response = await fetch(`${API_SERVER}/api/audio`, {
@@ -518,96 +713,108 @@ async function sendAudio(blob, ext) {
             const initialMessage = data.message || 'Audio recibido, procesando con Gemini...';
             addLog('📥', initialMessage, 'info');
 
-            if (data.job_id) {
-                try {
-                    const statusResponse = await fetch(`${API_SERVER}/api/audio/status/${data.job_id}`, {
-                        headers: { 'ngrok-skip-browser-warning': 'true' }
-                    });
-                    
-                    if (!statusResponse.ok) {
-                        throw new Error('Error de conexión SSE');
-                    }
-
-                    const reader = statusResponse.body.getReader();
-                    const decoder = new TextDecoder("utf-8");
-                    let buffer = '';
-
-                    while (true) {
-                        const { done, value } = await reader.read();
-                        if (done) break;
-
-                        buffer += decoder.decode(value, { stream: true });
-                        let parts = buffer.split('\n\n');
-                        buffer = parts.pop();
-
-                        for (let part of parts) {
-                            if (part.startsWith('data: ')) {
-                                try {
-                                    const statusData = JSON.parse(part.substring(6));
-                                    if (statusData.status === 'completed') {
-                                        addLog('📄', statusData.message || 'Transcripción escrita en Google Doc', 'success');
-                                        showNotification('success', '✅', statusData.message || 'Transcripción escrita');
-                                        reader.cancel();
-                                        return;
-                                    } else if (statusData.status === 'failed') {
-                                        addLog('❌', statusData.message || 'Error procesando audio', 'error');
-                                        showNotification('error', '❌', statusData.message || 'Error');
-                                        reader.cancel();
-                                        return;
-                                    }
-                                } catch (e) {
-                                    console.error('SSE Parse error', e);
-                                }
-                            }
-                        }
-                    }
-                } catch (err) {
-                    addLog('⚠️', 'Conexión con el servidor para actualizaciones interrumpida.', 'warning');
-                }
-            } else {
-                addLog('📄', 'Transcripción procesada', 'success');
-                showNotification('success', '✅', 'Transcripción procesada');
-            }
-        } else {
-            let errorDetail = '';
-            try {
-                const errData = await response.json();
-                errorDetail = errData.detail || '';
-            } catch {
-                errorDetail = response.statusText;
+            if (!data.job_id) {
+                return { outcome: 'processing-done' };
             }
 
-            if (response.status === 401) {
-                addLog('🔑', `Token inválido (401): ${errorDetail}`, 'error');
-                showNotification('error', '🔑', `Token inválido (401): ${errorDetail}`, 6000);
-            } else if (response.status === 400) {
-                addLog('⚠️', `Solicitud inválida (400): ${errorDetail}`, 'error');
-                showNotification('error', '⚠️', `Solicitud inválida (400): ${errorDetail}`, 6000);
-            } else if (response.status === 500) {
-                addLog('🔥', `Error del servidor (500): ${errorDetail}`, 'error');
-                showNotification('error', '🔥', `Error en el servidor (500): ${errorDetail}`, 6000);
-            } else {
-                addLog('❌', `Error ${response.status}: ${errorDetail}`, 'error');
-                showNotification('error', '❌', `Error ${response.status}: ${errorDetail}`, 6000);
-            }
+            // SSE de estado con timeout propio (~5 min): si el stream se cuelga, es reintentable.
+            const sseOutcome = await listenForStatus(data.job_id);
+            if (sseOutcome.outcome === 'completed')  return { outcome: 'completed',  message: sseOutcome.message };
+            if (sseOutcome.outcome === 'failed-job') return { outcome: 'failed-job', message: sseOutcome.message };
+            // SSE caído/timeout sin veredicto → reintentable (el backend puede haber recibido el audio).
+            return { outcome: 'retryable', message: 'Conexión interrumpida mientras se procesaba el audio.' };
         }
+
+        // Respuesta de error del servidor.
+        let errorDetail = '';
+        try {
+            const errData = await response.json();
+            errorDetail = errData.detail || '';
+        } catch {
+            errorDetail = response.statusText;
+        }
+
+        if (response.status === 401) {
+            return { outcome: 'auth-error', message: errorDetail };
+        }
+        // 400 es "solicitud inválida" (p.ej. audio corrupto): reintentar el mismo blob no ayuda,
+        // pero como no podemos distinguirlo de un transitorio, lo dejamos retryable y el backoff
+        // rápido lo resolverá si es transitorio; si no, el médico descarta.
+        const label = response.status === 400 ? 'Solicitud inválida (400)'
+                    : response.status === 500 ? 'Error del servidor (500)'
+                    : `Error ${response.status}`;
+        addLog('❌', `${label}: ${errorDetail}`, 'error');
+        return { outcome: 'retryable', message: `${label}: ${errorDetail}` };
     } catch (err) {
         clearTimeout(timeoutId);
         if (err.name === 'AbortError') {
-            addLog('⏱️', 'El servidor tardó demasiado en responder (timeout).', 'error');
-            showNotification('error', '⏱️', 'El servidor tardó demasiado en procesar tu audio.', 6000);
-        } else if (!navigator.onLine) {
-            addLog('📡', 'Sin conexión a internet', 'error');
-            showNotification('error', '📡', 'Sin conexión a internet', 6000);
-        } else if (err.name === 'TypeError' && err.message.includes('fetch')) {
-            addLog('🌐', 'Error de red: no se pudo conectar al servidor', 'error');
-            showNotification('error', '🌐', `Error de red: no se pudo conectar al servidor. Verifica la URL.`, 8000);
-        } else {
-            addLog('❌', `Error de conexión: ${err.message}`, 'error');
-            showNotification('error', '❌', `Error de conexión: ${err.message}`, 6000);
+            return { outcome: 'retryable', message: 'Timeout: el servidor tardó demasiado.' };
         }
+        if (!navigator.onLine) {
+            return { outcome: 'retryable', message: 'Sin conexión a internet.' };
+        }
+        if (err.name === 'TypeError' && err.message.includes('fetch')) {
+            return { outcome: 'retryable', message: 'No se pudo conectar al servidor.' };
+        }
+        return { outcome: 'retryable', message: `Error de conexión: ${err.message}` };
+    }
+}
+
+/**
+ * Escucha el stream SSE de estado del job con timeout de 5 min.
+ * Devuelve { outcome: 'completed' | 'failed-job' | 'interrupted' }.
+ */
+async function listenForStatus(jobId) {
+    const sseController = new AbortController();
+    const sseTimeout = setTimeout(() => sseController.abort(), 300000); // 5 min
+
+    try {
+        const statusResponse = await fetch(`${API_SERVER}/api/audio/status/${jobId}`, {
+            headers: { 'ngrok-skip-browser-warning': 'true' },
+            signal: sseController.signal
+        });
+
+        if (!statusResponse.ok) {
+            return { outcome: 'interrupted' };
+        }
+
+        const reader = statusResponse.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const parts = buffer.split('\n\n');
+            buffer = parts.pop();
+
+            for (const part of parts) {
+                if (!part.startsWith('data: ')) continue;
+                try {
+                    const statusData = JSON.parse(part.substring(6));
+                    if (statusData.status === 'completed') {
+                        clearTimeout(sseTimeout);
+                        try { await reader.cancel(); } catch {}
+                        return { outcome: 'completed', message: statusData.message };
+                    }
+                    if (statusData.status === 'failed') {
+                        clearTimeout(sseTimeout);
+                        try { await reader.cancel(); } catch {}
+                        return { outcome: 'failed-job', message: statusData.message };
+                    }
+                } catch (e) {
+                    console.error('SSE Parse error', e);
+                }
+            }
+        }
+        // El stream terminó sin veredicto explícito: lo tratamos como interrumpido.
+        return { outcome: 'interrupted' };
+    } catch (err) {
+        return { outcome: 'interrupted' };
     } finally {
-        resetUI();
+        clearTimeout(sseTimeout);
     }
 }
 
