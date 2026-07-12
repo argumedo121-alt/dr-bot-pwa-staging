@@ -67,6 +67,105 @@ const STORAGE_KEYS = {
     SKIN:   'drbot_pwa_skin',
 };
 
+// ─── Audio Vault: cifrado AES-256-GCM + IndexedDB con TTL ───
+const VAULT_DB_NAME = 'drbot_audio_vault';
+const VAULT_DB_VERSION = 1;
+const VAULT_STORE = 'recordings';
+const VAULT_TTL_MS = 3600000; // 1 hora
+
+function idbReq(request) {
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+function openVault() {
+    return new Promise((resolve, reject) => {
+        const req = indexedDB.open(VAULT_DB_NAME, VAULT_DB_VERSION);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(VAULT_STORE)) {
+                db.createObjectStore(VAULT_STORE, { keyPath: 'id', autoIncrement: true });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+    });
+}
+
+async function encryptAndStore(arrayBuffer, ext, mimeType) {
+    if (!crypto?.subtle) throw new Error('Web Crypto API no disponible');
+    const key = await crypto.subtle.generateKey(
+        { name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']
+    );
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encryptedData = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, arrayBuffer);
+    const exportedKey = await crypto.subtle.exportKey('raw', key);
+
+    const db = await openVault();
+    const tx = db.transaction(VAULT_STORE, 'readwrite');
+    const id = await idbReq(tx.objectStore(VAULT_STORE).add({
+        encryptedData, iv: Array.from(iv), exportedKey, ext, mimeType, createdAt: Date.now()
+    }));
+    // Auto-limpieza de respaldo tras TTL
+    setTimeout(() => cleanupExpired(), VAULT_TTL_MS);
+    return id;
+}
+
+async function retrieveAndDecrypt(id) {
+    const db = await openVault();
+    const tx = db.transaction(VAULT_STORE, 'readonly');
+    const record = await idbReq(tx.objectStore(VAULT_STORE).get(id));
+    if (!record) return null;
+    if (Date.now() - record.createdAt > VAULT_TTL_MS) {
+        deleteFromVault(id).catch(() => {});
+        return null;
+    }
+    const key = await crypto.subtle.importKey(
+        'raw', record.exportedKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']
+    );
+    const decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: new Uint8Array(record.iv) }, key, record.encryptedData
+    );
+    return { arrayBuffer: decrypted, ext: record.ext, mimeType: record.mimeType };
+}
+
+async function deleteFromVault(id) {
+    const db = await openVault();
+    const tx = db.transaction(VAULT_STORE, 'readwrite');
+    tx.objectStore(VAULT_STORE).delete(id);
+    return new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+    });
+}
+
+async function cleanupExpired() {
+    try {
+        const db = await openVault();
+        const tx = db.transaction(VAULT_STORE, 'readwrite');
+        const store = tx.objectStore(VAULT_STORE);
+        const all = await idbReq(store.getAll());
+        const now = Date.now();
+        let cleaned = 0;
+        for (const rec of all) {
+            if (rec.id === pendingSend) continue; // no tocar audio en reintento activo
+            if (now - rec.createdAt > VAULT_TTL_MS) {
+                store.delete(rec.id);
+                cleaned++;
+            }
+        }
+        await new Promise((resolve, reject) => {
+            tx.oncomplete = resolve;
+            tx.onerror = () => reject(tx.error);
+        });
+        if (cleaned > 0) addLog('🧹', `Vault: ${cleaned} audio(s) expirado(s) eliminado(s)`, 'info');
+    } catch (err) {
+        console.error('Vault cleanup error:', err);
+    }
+}
+
 function getToken()  { return localStorage.getItem(STORAGE_KEYS.TOKEN);  }
 function getSkin()   { return localStorage.getItem(STORAGE_KEYS.SKIN) || 'normal'; }
 function saveConfig(token) { localStorage.setItem(STORAGE_KEYS.TOKEN, token); }
@@ -87,6 +186,7 @@ function showRecorder() {
 }
 
 function init() {
+    cleanupExpired();
     if (getToken()) {
         showRecorder();
     } else {
@@ -295,6 +395,7 @@ function renderAccountInfo(data) {
         <div class="account-row"><span class="account-label">📱 Telegram</span><span class="account-value">${telegramIcon} ${data.is_telegram_linked ? 'Vinculado' : 'No vinculado'}</span></div>
         <div class="account-row"><span class="account-label">📄 Doc. transcripciones</span><span class="account-value">${docIcon} ${data.has_transcription_doc ? 'Configurado' : 'Sin configurar'}</span></div>
         <div class="account-row"><span class="account-label">🟢 Estado</span><span class="account-value">${data.is_active ? 'Activa' : 'Inactiva'}</span></div>
+        <div class="account-row"><span class="account-label">🏷️ Versión App</span><span class="account-value" style="color: #60a5fa;">v1.2 (Vault)</span></div>
     `;
 }
 
@@ -378,6 +479,7 @@ discardBtn.addEventListener('click', () => {
 });
 
 async function startRecording() {
+    cleanupExpired();
     try {
         const stream = await navigator.mediaDevices.getUserMedia({ 
             audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 } 
@@ -407,9 +509,21 @@ async function startRecording() {
             }
             
             addLog('⏹️', `Grabación detenida (${timerEl.textContent})`, 'info');
-            const ext = mediaRecorder.mimeType.includes('mp4') ? '.mp4' : '.webm';
-            const blob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-            sendAudio(blob, ext);
+            const mimeType = mediaRecorder.mimeType;
+            const ext = mimeType.includes('mp4') ? '.mp4' : '.webm';
+            const blob = new Blob(audioChunks, { type: mimeType });
+            addLog('🔐', `Cifrando audio (${(blob.size / 1024).toFixed(1)} KB, ${mimeType})…`, 'info');
+            blob.arrayBuffer().then(buffer => {
+                addLog('🔐', `ArrayBuffer materializado (${buffer.byteLength} bytes)`, 'info');
+                return encryptAndStore(buffer, ext, mimeType);
+            }).then(vaultId => {
+                addLog('🔐', `Audio cifrado y almacenado en vault (id: ${vaultId})`, 'info');
+                sendAudio(vaultId);
+            }).catch(err => {
+                addLog('❌', `Audio corrupto — no se pudo leer: ${err.message}`, 'error');
+                showNotification('error', '❌', 'Audio corrupto. Graba de nuevo.');
+                resetUI();
+            });
         };
 
         mediaRecorder.onerror = (e) => {
@@ -561,7 +675,7 @@ function setButtonStatus(status) {
 }
 
 // ─── Failed state UI (reintento manual / descartar) ───
-let pendingSend = null; // { blob, ext } de la grabación que está en reintento
+let pendingSend = null; // vaultId (number) del audio en reintento
 
 function setFailedState(message) {
     recordBtn.classList.remove('sending');
@@ -587,19 +701,13 @@ function clearFailedState() {
     pendingSend = null;
 }
 
-async function sendAudio(blob, ext) {
+async function sendAudio(vaultId) {
     const token  = getToken();
     if (!token) {
         showNotification('error', '⚙️', 'Token no configurado');
+        deleteFromVault(vaultId).catch(() => {});
         resetUI();
         showSetup();
-        return;
-    }
-
-    if (blob.size < 100) {
-        addLog('⚠️', 'Audio demasiado corto', 'warning');
-        showNotification('warning', '⚠️', 'Audio demasiado corto, intenta de nuevo');
-        resetUI();
         return;
     }
 
@@ -615,15 +723,49 @@ async function sendAudio(blob, ext) {
         if (userCancelledSend) {
             // El médico tocó Descartar durante un reintento en background.
             addLog('🗑️', 'Envío cancelado por el médico', 'warning');
+            deleteFromVault(vaultId).catch(() => {});
             clearFailedState();
             resetUI();
             return;
         }
 
-        const result = await attemptSend(blob, ext, token);
+        // ── Vault: leer y descifrar para crear un Blob fresco en cada intento ──
+        let vaultData;
+        try {
+            vaultData = await retrieveAndDecrypt(vaultId);
+        } catch (err) {
+            addLog('❌', `Error leyendo vault (id: ${vaultId}): ${err.message}`, 'error');
+            showNotification('error', '❌', 'Error interno leyendo audio. Graba de nuevo.');
+            clearFailedState();
+            resetUI();
+            return;
+        }
+        if (!vaultData) {
+            addLog('⚠️', `Audio expirado o eliminado del vault (id: ${vaultId})`, 'warning');
+            showNotification('warning', '⏰', 'El audio expiró (>1h). Graba de nuevo.');
+            clearFailedState();
+            resetUI();
+            return;
+        }
+
+        const freshBlob = new Blob([vaultData.arrayBuffer], { type: vaultData.mimeType });
+        addLog('🔓', `Blob reconstruido desde vault (${(freshBlob.size / 1024).toFixed(1)} KB, intento ${attempt + 1})`, 'info');
+
+        if (freshBlob.size < 100) {
+            addLog('⚠️', `Audio demasiado corto tras descifrar (${freshBlob.size} bytes)`, 'warning');
+            showNotification('warning', '⚠️', 'Audio demasiado corto, intenta de nuevo');
+            deleteFromVault(vaultId).catch(() => {});
+            clearFailedState();
+            resetUI();
+            return;
+        }
+
+        const result = await attemptSend(freshBlob, vaultData.ext, token);
         attempt++;
 
         if (result.outcome === 'completed') {
+            await deleteFromVault(vaultId).catch(() => {});
+            addLog('🔐', `Vault: audio ${vaultId} eliminado tras transcripción exitosa`, 'info');
             addLog('📄', result.message || 'Transcripción escrita en Google Doc', 'success');
             showNotification('success', '✅', result.message || 'Transcripción escrita');
             setButtonStatus('success');
@@ -632,7 +774,8 @@ async function sendAudio(blob, ext) {
             return;
         }
         if (result.outcome === 'processing-done') {
-            // El backend procesó sin SSE/job_id; asumimos éxito.
+            await deleteFromVault(vaultId).catch(() => {});
+            addLog('🔐', `Vault: audio ${vaultId} eliminado tras procesamiento exitoso`, 'info');
             addLog('📄', 'Transcripción procesada', 'success');
             showNotification('success', '✅', 'Transcripción procesada');
             setButtonStatus('success');
@@ -642,6 +785,8 @@ async function sendAudio(blob, ext) {
         }
         if (result.outcome === 'failed-job') {
             // El servidor respondió pero el job reportó fallo: no reintentar (no es de red).
+            await deleteFromVault(vaultId).catch(() => {});
+            addLog('🔐', `Vault: audio ${vaultId} eliminado (job fallido, no reintentar)`, 'info');
             addLog('❌', result.message || 'Error procesando audio', 'error');
             showNotification('error', '❌', result.message || 'Error', 6000);
             setButtonStatus('failed');
@@ -651,6 +796,8 @@ async function sendAudio(blob, ext) {
         }
         if (result.outcome === 'auth-error') {
             // 401: token malo, no reintentar.
+            await deleteFromVault(vaultId).catch(() => {});
+            addLog('🔐', `Vault: audio ${vaultId} eliminado (token inválido)`, 'info');
             addLog('🔑', `Token inválido (401): ${result.message}`, 'error');
             showNotification('error', '🔑', `Token inválido (401): ${result.message}`, 6000);
             setButtonStatus('failed');
@@ -666,7 +813,7 @@ async function sendAudio(blob, ext) {
         if (result.offline) {
             addLog('⚠️', result.message || 'Sin conexión.', 'error');
             showNotification('error', '📡', 'Sin conexión. Reintentar o descartar para escribir tú.', 8000);
-            pendingSend = { blob, ext };
+            pendingSend = vaultId;
             setFailedState('Sin conexión. Toca reintentar o descartar.');
             return;
         }
@@ -686,7 +833,7 @@ async function sendAudio(blob, ext) {
         // Reintentos automáticos agotados → ceder el control al médico.
         addLog('⚠️', result.message || 'No se pudo enviar tras varios intentos.', 'error');
         showNotification('error', '⚠️', 'Sin conexión. Reintentar o descartar para escribir tú.', 8000);
-        pendingSend = { blob, ext };
+        pendingSend = vaultId;
         setFailedState();
         return;
     }
@@ -714,19 +861,23 @@ function hideBackgroundDiscard() {
 // Reintento manual: el médico tocó el botón secundario en estado .failed.
 async function manualRetry() {
     if (!pendingSend) return;
-    const { blob, ext } = pendingSend;
+    addLog('🔄', `Reintento manual desde vault (id: ${pendingSend})`, 'info');
     userCancelledSend = false;
     recordBtn.classList.remove('failed');
     recordBtn.classList.add('sending');
     discardBtn.classList.add('hidden');
     statusIcon.textContent = '📤';
     statusText.textContent = 'Reintentando envío…';
-    await sendAudio(blob, ext);
+    await sendAudio(pendingSend);
 }
 
 // Descarte limpio: el médico decide irse al Google Doc.
 function manualDiscard() {
     userCancelledSend = true; // por si hay un reintento en background aún corriendo
+    if (pendingSend) {
+        deleteFromVault(pendingSend).catch(() => {});
+        addLog('🔐', `Vault: audio ${pendingSend} eliminado (descartado por médico)`, 'info');
+    }
     addLog('🗑️', 'Envío cancelado por el médico', 'warning');
     showNotification('warning', '🗑️', 'Envío cancelado. Puedes escribir directamente en el Google Doc.', 4000);
     clearFailedState();
@@ -811,11 +962,12 @@ async function attemptSend(blob, ext, token) {
         if (response.status === 401) {
             return { outcome: 'auth-error', message: errorDetail };
         }
-        // 400 es "solicitud inválida" (p.ej. audio corrupto): reintentar el mismo blob no ayuda,
-        // pero como no podemos distinguirlo de un transitorio, lo dejamos retryable y el backoff
-        // rápido lo resolverá si es transitorio; si no, el médico descarta.
-        const label = response.status === 400 ? 'Solicitud inválida (400)'
-                    : response.status === 500 ? 'Error del servidor (500)'
+        // 400 = audio corrupto/inválido: reintentar el mismo blob no ayuda.
+        if (response.status === 400) {
+            addLog('❌', `Audio rechazado por servidor (400): ${errorDetail}`, 'error');
+            return { outcome: 'failed-job', message: 'Audio corrupto o inválido. Graba de nuevo.' };
+        }
+        const label = response.status === 500 ? 'Error del servidor (500)'
                     : `Error ${response.status}`;
         addLog('❌', `${label}: ${errorDetail}`, 'error');
         return { outcome: 'retryable', message: `${label}: ${errorDetail}` };
@@ -899,3 +1051,6 @@ async function listenForStatus(jobId) {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') cleanupExpired();
+});
